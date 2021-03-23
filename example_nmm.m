@@ -181,7 +181,7 @@ end
     
 if REAL_DATA
     % Load real data from .mat :
-    load('../../../Data-Driven-Estimation/data/Seizure_1.mat');  % change this path to load alternative data
+    load('./data/Seizure_1.mat');  % change this path to load alternative data
     y = Seizure(:,1)';
     params.dt = T/length(y);
     if TRUNCATE
