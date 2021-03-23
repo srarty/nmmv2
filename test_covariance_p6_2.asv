@@ -1,0 +1,79 @@
+% TEST_COVARIANCE_P6 Tests the term P6 of the covariance expectation
+% polynomial
+%
+%   P6 = E[g(x)*g(x)']
+%        E_gx_gx
+%
+% Inputs:
+%   N           - Number of iterations for the Monte Carlo
+%   N_samples   - (optional) Number of samples in the distribution
+%   N_states    - (optional) Number of states. This is the size of the
+%                 state vector
+%
+% Outputs:
+%   err - Estimation error. We expect a Gaussian distribution around zero
+%   estimate - Output of the Monte Carlo estimation
+%   analytic - Output of the analytic solution
+%
+% Example:
+%   err = test_covariance_p6_2(100);
+%   histogram(err(1,:));   
+%   hold on;
+%   histogram(err(2,:));
+% 
+% Last edit - Artemio Soto, 2020
+function [err, varargout] = test_covariance_p6(N, varargin)
+    N_samples = 1000;
+    N_states = 2;
+    
+    if nargin > 1, N_samples = varargin{1}; end
+    if nargin > 2, N_states = varargin{2}; end
+    
+    sample_term_ = zeros(N_states, N_states, N); % Variable to iterate through the N iterations of the Monte Carlo
+    sample_term = zeros(1, N_states); % The estimate of each iteration
+    
+    mu = [4; 2]; % This vector must have a size: (1,N_states)
+    sigma = [1 0; 0 2]; % This vector must have a size: (1,N_states)
+    
+    % Check dimmensions of mu and sigma. Throw an error if they don't match
+    % with N_states.
+    if length(mu)~=N_states || length(sigma)~=N_states
+        error('The dimmensions of ''mu'' or ''sigma'' do not correspond to ''N_states''.');
+    end
+    
+    
+    r = 3;  % erf sigmoid
+    v0 = 6;
+    for nn = 1:N
+        % MV gaussian
+        x = mvnrnd(mu, sigma, N_samples);
+        out = non_linear_sigmoid(x, r, v0);
+        sample_mean = mean(out);
+        
+        % Matrix multiplication and then take the mean. 
+        sample_term(nn) = sample_mean * sample_mean';
+    end
+    
+    % analytic expectation
+    % Bivariate:
+%     z_ = mvnrnd(v0, r, 2)';
+    N_z_points = 1; % Multivariate Gaussian cdf neads z to be nXd where n is the number of observations and d is the size of the states (states 'x' is a column vector, in z the states are a row vector)
+    z_ = v0 + r.*randn(N_z_points, N_states); % 2 new independent random variables z1 and z2. Normal distribution with mean v0 and variance r.
+    z = zeros(size(z_));
+    for i = 1:size(z_,1)
+        z(i,:) = non_linear_sigmoid(z_(i,:)', r, v0, diag(sigma))';
+    end
+    mu_hat = [v0 - mu(1); v0 - mu(2)];
+    
+    sigma_hat = [r^2+sigma(1,1), sigma(1,2); ...
+                 sigma(2,1)    , r^2+sigma(2,2)];%     sigma_hat = r^2 * eye(N_states) + cov(x(:,1), x(:,2));
+    
+    E_gx_gx = mvncdf(z, mu_hat', sigma_hat); % Multivariate Gaussian cumulative distribution with mean mu_hat and variance sigma_hat
+    if numel(E_gx_gx) > 1
+        e_
+    
+    analytic_term = E_gx_gx; % Analytic expectation
+    err = sample_term - analytic_term;
+    varargout = {sample_term, analytic_term};
+end
+
