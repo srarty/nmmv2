@@ -92,7 +92,7 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,
         elseif strcmpi('runge', integration_method)
             % Runge-Kutta Integration
             
-            h = 1.5; % step size (number of samples)
+            h = 0.25; % step size (number of samples)
             s1 = nan(NStates, NSamples-1);	s2 = nan(NStates, NSamples-1);	s3 = nan(NStates, NSamples-1);	s4 = nan(NStates, NSamples-1);
             p1 = nan(NStates);	p2 = nan(NStates);	p3 = nan(NStates);	p4 = nan(NStates);
 

@@ -13,13 +13,13 @@ NAugmented = NStates + NInputs + NParams; % Total size of augmented state vector
 
 ESTIMATE = true;    % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
 REMOVE_DC = false;  % Remove DC offset from simulated observed EEG
-ADD_NOISE = false;	% Add noise to the forward model
+ADD_NOISE = true;	% Add noise to the forward model
 FIX_PARAMS = false;	% Fix input and alpha parameters to initial conditions
 
-PCRB = false; % Compute the PCRB (true or false)
-REAL_DATA = false; % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
-TRUNCATE = false; % If true, the real data from recordings is truncated from sample 1 to 'N'
-SCALE_DATA = true; % Scale Raw data to match dynamic range of the membrane potentials in our model
+PCRB = false;       % Compute the PCRB (true or false)
+REAL_DATA = false;  % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
+TRUNCATE = false;   % If true, the real data from recordings is truncated from sample 1 to 'N'
+SCALE_DATA = true;  % Scale Raw data to match dynamic range of the membrane potentials in our model
 
 relativator = @(x)sqrt(mean(x.^2,2));% @(x)(max(x')-min(x'))'; % If this is different to 1, it calculates the relative RMSE dividing by whatever this value is.
 % -----------
@@ -204,10 +204,7 @@ m0(5) = mean(y(ceil(size(y,2)/2):end));
 % P0(NAugmented - NParams + 1 : end, NAugmented - NParams + 1 : end) = 1e3*eye(NParams);
 
 % Apply EKF filter
-% [m_, Phat_] = extended_kalman_filter_2(y,f,F,H,Q,R,m0,P0);
-% [m, Phat] = extended_kalman_filter_2(y,f,F,H,Q,R,m0,P0);
-[m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,[],nmm,H,Q,R,m0,P0,'euler');
-% [m__, P__] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,m0,P0,'runge');
+[m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,[],nmm,H,Q,R,m0,P0,'runge');
 
 % y_ekf = H*m_;% + w;
 y_analytic = H*m;% + w;
