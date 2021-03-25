@@ -47,8 +47,8 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,
     NStates = length(m0); % Number of states
     v = mvnrnd(zeros(NStates,1),Q,NSamples)'; % Measurement noise
     
-    scale = 1/50;%50; % Factor to which the derivative states (2,4,...) are scaled to mantain all states within a range of magnitudes
-    scale_range = [1:2:4 5];%, 5, 6, 7]; % 1:2:NStates
+    scale_kf = 1/10; % Factor to which the derivative states (2,4,...) are scaled to mantain all states within a range of magnitudes
+    scale_range = [1:2:4 5 6 7];% 6 7];%, 5, 6, 7]; % 1:2:NStates
     
     % Initialize mean and covariance.
     % Mean:
@@ -128,9 +128,9 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,
         %-------------- end prediction
         
         % Scale derivatives (divide by a factor)
-        x_hat(scale_range,n+1) = x_hat(scale_range,n+1)./scale;
-        P_hat(scale_range, scale_range, n+1) = P_hat(scale_range, scale_range, n+1)./scale;        
-        y(n+1) = y(n+1)./scale;
+        x_hat(scale_range,n+1) = x_hat(scale_range,n+1)./scale_kf;
+        P_hat(scale_range, scale_range, n+1) = P_hat(scale_range, scale_range, n+1)./scale_kf;        
+        y(n+1) = y(n+1)./scale_kf;
         
         % Update step
         K(:,n+1) = P_hat(:,:,n+1)*H' / ((H*P_hat(:,:,n+1)*H' + R)); % K = P_hat(:,:,n+1)*H' * inv((H*P_hat(:,:,n+1)*H' + R));
@@ -155,9 +155,9 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,
         end
         
         % Rescale derivatives back (multiply by scale factor)
-        x_hat(scale_range,n+1) = x_hat(scale_range,n+1).*scale;
-        P_hat(scale_range, scale_range, n+1) = P_hat(scale_range, scale_range, n+1).*scale; 
-        y(n+1) = y(n+1).*scale;
+        x_hat(scale_range,n+1) = x_hat(scale_range,n+1).*scale_kf;
+        P_hat(scale_range, scale_range, n+1) = P_hat(scale_range, scale_range, n+1).*scale_kf; 
+        y(n+1) = y(n+1).*scale_kf;
         
         % Update progress bar
         if verbose, try wbhandle = waitbar(n/NSamples, wbhandle); catch, delete(wbhandle); error('Manually stopped'); end, end

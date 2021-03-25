@@ -75,7 +75,6 @@ phi = [f_e; f_i]; % Only the important indexes. This phi should be equal to the 
 C_inhibit = C; % Auxiliary matrix C_inhibit, same as C but the inhibitory element is negative to include it in the nonlinearity as inhibition
 C_inhibit(2,3) = -1;
 phi_c = non_linear_sigmoid(C_inhibit*x,r,v0); % Complete phi from C
-% C(C<0) = -1*C(C<0);
 switch mode
     case 'transition'                
         % Nonlinear transition model
@@ -145,6 +144,7 @@ switch mode
         
         %% P7 and P8 
         % Question: Do this term need to be multiplied by dt?         
+
         E_x_gx = [0                     0                          0                           0                    0  0  0; ...
                   0    E_xi_gxj(x(1),x(1),v0,P(1,1), P(1,1),r)     0        E_xi_gxj(x(1),x(3),v0,P(3,3), P(1,3),r) 0  0  0; ...
                   0                     0                          0                           0                    0  0  0; ...
@@ -167,17 +167,20 @@ switch mode
         P8 = E_x_gx';% E_gx_x;% E_x_gx_2*F'; % This is the transpose of P7
         
         %% Output:
-        % TODO: Fix P3, 4 and 5. Their order of magnitude is too large?
-        % TODO: Deactivate each term once at a time to find out which one 
-        % TODO: double check the dropped term in propagate mean and variance
         % TODO: Check the 1's and 0's are correctly placed in Egxgx
 
-        analytic_cov = P1 + P3 + P4 + P5 + P6 + P7 + P8;            
-%         analytic_cov = P1 ;%+ 1e-2*(P3 + P4 + P5) + P6 + P7 + P8;   
-%         analytic_cov = P1 + 1e-2*(P3 + P4 + P5 + P6 + P7 + P8);
+        analytic_cov = P1 + P3 + P4 + P5 + P6;% + P7 + P8;
+        
+        % P7 and P8 are covered by the following lines (?)
+        % Missing covariance terms (updates alpha params):
+        q2 = Upsilon.*(Bxi - dCPB.*beta.*gamma.^2 *2);
+        AP = A*P;        
+        Phi = ones(NStates,1)*q2'.*(AP*C_inhibit(z_idx,:)') + ones(NStates,1)*Xi'.*(AP*B(z_idx,:)');
+        analytic_cov(:,z_idx) = analytic_cov(:,z_idx) + Phi;
+        analytic_cov(z_idx,:) = analytic_cov(z_idx,:) + Phi';
         
         %% Analytic Covariance (Pip)
-%         % cov part 1 (Phi)
+        % cov part 1 (Phi)
 %         q2 = Upsilon.*(Bxi - dCPB.*beta.*gamma.^2 *2);
 %         AP = A*P;
 %         
@@ -219,7 +222,7 @@ switch mode
 %         P_1m(:,z_idx) = P_1m(:,z_idx) + Phi;
 %         P_1m(z_idx,:) = P_1m(z_idx,:) + Phi';
 %         analytic_cov = P_1m;
-%       
+      
         varargout{1} = analytic_mean; % E_t
         varargout{2} = analytic_cov; % P_t
         

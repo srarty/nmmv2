@@ -19,7 +19,7 @@ FIX_PARAMS = false;	% Fix input and alpha parameters to initial conditions
 PCRB = false;       % Compute the PCRB (true or false)
 REAL_DATA = false;  % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
 TRUNCATE = false;   % If true, the real data from recordings is truncated from sample 1 to 'N'
-SCALE_DATA = true;  % Scale Raw data to match dynamic range of the membrane potentials in our model
+SCALE_DATA = false;  % Scale Raw data to match dynamic range of the membrane potentials in our model
 
 relativator = @(x)sqrt(mean(x.^2,2));% @(x)(max(x')-min(x'))'; % If this is different to 1, it calculates the relative RMSE dividing by whatever this value is.
 % -----------
@@ -95,8 +95,8 @@ end
 
 % Calculate noise covariance based on trajectory variance over time??
 %   Why noise on all states?
-Q = 10^-3.*diag((0.4*std(x,[],2)*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
-Q(NStates+1 : end, NStates+1 : end) =  10e-1*eye(NAugmented - NStates);
+Q = 10^-3.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
+% Q(NStates+1 : end, NStates+1 : end) =  10e-3*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
 
 % Initialise random number generator for repeatability
 rng(0);
@@ -118,6 +118,8 @@ H = zeros(1, NAugmented);
 H(1) = 1;        
 H(NStates + 1) = 1;
 H = H.*1; % Scale the observation matrix if needed
+% Scale
+H = H/nmm.params.scale;
 
 R = 1^-3*eye(1);
 
@@ -197,22 +199,21 @@ end
 % Prior distribution (defined by m0 & P0)
 m0 = mean(x(:,ceil(size(x,2)/2):end),2);%mean();% x0;
 m0(5) = mean(y(ceil(size(y,2)/2):end));
-% m0(6) = 10*rand();
-% m0(7) = 10*rand();
+m0(6) = x0(6) + x0(6)*(rand()-0.5);
+m0(7) = x0(7) + x0(7)*(rand()-0.5);
 % P0 = 1e2*eye(NAugmented); % P0 will use the same initial value as the
 % forward model
 % P0(NAugmented - NParams + 1 : end, NAugmented - NParams + 1 : end) = 1e3*eye(NParams);
 
 % Apply EKF filter
-[m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,[],nmm,H,Q,R,m0,P0,'runge');
+[m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,[],nmm,H,Q,R,m0,P0,'euler');
 
 % y_ekf = H*m_;% + w;
 y_analytic = H*m;% + w;
 
 %% Plot results
-%
 if ~REAL_DATA
-    % Plot x(1) and ECoG
+    %% Plot x(1) and ECoG
     figure
     ax1=subplot(211);
     plot(t,x(1,:)'); hold on;
@@ -232,7 +233,7 @@ if ~REAL_DATA
     xlabel('Time (s)');
     linkaxes([ax1 ax2],'x');
 
-    % Plot all 4 states
+    %% Plot all 4 states
     figure
     axs = nan(NStates,1); % Axes handles to link subplots x-axis
     for i = 1:NStates
@@ -247,7 +248,7 @@ if ~REAL_DATA
     legend({'Simulation', 'Estimation'});
     xlabel('time');
     
-    % Plot external input and augmented parameters
+    %% Plot external input and augmented parameters
     figure
     axs = nan(NAugmented - NStates,1); % Axes handles to link subplots x-axis
     for i = 1:NAugmented - NStates
@@ -262,7 +263,7 @@ if ~REAL_DATA
     xlabel('time');
     legend({'Simulation', 'Estimation'});
     
-    % Firing rates (Output of the nonlinearity)
+    %% Firing rates (Output of the nonlinearity)
     figure
     ax1 = subplot(2,1,1);
     plot(t, f_e);
@@ -278,7 +279,7 @@ if ~REAL_DATA
     linkaxes([ax1 ax2],'x');
     xlabel('Time (s)');
         
-    % Covariance (Estimation)
+    %% Covariance (Estimation)
     figure
     % plt = @(x,varargin)plot(t,squeeze(x)./max(abs(squeeze(x))),varargin{1});
     plt = @(x,varargin)plot(t,squeeze(x),varargin{1});
@@ -290,9 +291,22 @@ if ~REAL_DATA
         plt(Phat(i,i,:),'--');hold on;
 %         plt(Phat_(i,i,:),'--');
     end
-    legend({'Analytic', 'EKF'});
+    legend({'Simulation', 'Analytic KF'});
     subplot(2,4,1);
     title('Covariance matrix (P) - Diagonal');
+    
+    %% Covariance of alpha vectors
+    figure
+    for i = 1:NAugmented
+        for j = 1:NAugmented
+            subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
+            % Estimation
+            plt(Phat(j,i,:),''); hold on;
+%             xlim([0 0.2]);
+%             ylim([-100000 100000]);
+        end
+    end
+    
 else
     % If estimating real data
     figure
@@ -358,8 +372,7 @@ else
     end
 %     legend({'EKF' 'Analytic'});
     legend({'Analytic'});
-    subplot(2,4,1);title('Covariance matrix (P) - Diagonal');
-
+    subplot(2,4,1);title('Covariance matrix (P) - Diagonal'); 
 end
 
 %% Compute the posterior Cramer-Rao bound (PCRB)

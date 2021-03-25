@@ -25,30 +25,26 @@ decay_i     = params.decay_i; % (inhibitory)
 alpha_ei    = params.alpha_ei; % synaptic gains (excitatory)
 alpha_ie    = params.alpha_ie; % (inhibitory)
 u           = params.u;	% mean input firing rate.
+scale       = params.scale; % Scale to fix mismatch in state amplitudes. Not to be confused with the scael in analytic_kalman_filter_2
 
 c_constant = 100;
 c1 = 1*c_constant;	% number of synapses
 c2 = 0.8*c_constant;
 
-% the states
-% Scaling the states (?)
-% scale = b*[2/v0, 1, 2/v0, 1]; % Divides by the inhibitory time constant
-% x = x .* scale';
-
 % Number of augmented states
 xlen = length(x);
 
 % Linear component of model
-A =     [1,              dt,         0,              0,          0,  0,  0; ...
-    -decay_e^2*dt,  1-2*decay_e*dt,  0,              0,          0,  0,  0; ...
-         0,              0,          1,              dt,         0,  0,  0; ...
-         0,              0    -decay_i^2*dt,   1-2*decay_i*dt,   0,  0,  0; ...
-         0,              0,          0,              0,          1,  0,  0; ...
-         0,              0,          0,              0,          0,  1,  0; ...
-         0,              0,          0,              0,          0,  0,  1];
+A =     [1,                  dt*scale,      0,              0,          0,  0,  0; ...
+  -decay_e^2*dt/scale,	1-2*decay_e*dt,     0,              0,          0,  0,  0; ...
+         0,                     0,          1,            dt*scale,     0,  0,  0; ...
+         0,                     0  -decay_i^2*dt/scale,	1-2*decay_i*dt,	0,  0,  0; ...
+         0,                     0,          0,              0,          1,  0,  0; ...
+         0,                     0,          0,              0,          0,  1,  0; ...
+         0,                     0,          0,              0,          0,  0,  1];
 
      
-                                                                 
+% B Matrix (Augmented parameters)                                                                
 %      
 % B =     [0,              0,          0,              0,          0,  0,  0; ...
 %          0               0,          0,              0           1,  1,  0; ...
@@ -57,10 +53,8 @@ A =     [1,              dt,         0,              0,          0,  0,  0; ...
 %          0,              0,          0,              0,          0,  0,  0; ...
 %          0,              0,          0,              0,          0,  0,  0; ...
 %          0,              0,          0,              0,          0,  0,  0];
-     
-% B Matrix (Augmented parameters)
+%
 B = zeros(xlen);
-% B(z_idx, z_idx) = dt .* diag([decay_e decay_i].*ones(size(z_idx)));
 B(z_idx, alpha_idx) = diag(ones(size(z_idx)));
 
 % C Matrix (Augmented)
@@ -68,10 +62,22 @@ C = zeros(xlen);
 C(2,3) = 1; % inhibitory -> excitatory
 C(4,1) = 1; % excitatory -> inhibitory
 C(2,u_idx) = 1; % input -> excitatory
+C = C./scale;
 
 alpha_i = alpha_ei * c1 * 2 * e_0 * dt * decay_e; % lumped constant (inhibitory, input to)
 alpha_e = alpha_ie * c2 * 2 * e_0 * dt * decay_i; % lumped constant (excitatory, input to)
 
+% SCALE 1 - this is to avoid large differences between states upsetting the filter 
+% (magnitude of the membrane potentials and their derivatives)
+input = scale*u;
+% SCALE 2 - this converts a constant input to its effect on the pyramidal
+% membrane potential by taking the steady state limit of the synaptic kernel
+% (assumption that the input varies much slower than the state variables).
+% input = input * alpha_ei*decay_e /decay_e^2;
+%       ~~~~~   ~~~~~~~~~~~~~~   ~~~~~~~~~
+%       input   synaptic gain    integral of kernel
+
+x(5) = input;
 x(6) = alpha_e;
 x(7) = alpha_i;
 
@@ -82,6 +88,5 @@ nmm.C = C;
 nmm.x0 = x;
 nmm.P0 = P;
 nmm.params = params;
-% nmm.t = 1;
 
 end % end function - nmm_define
