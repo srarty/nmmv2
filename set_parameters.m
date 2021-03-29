@@ -2,7 +2,7 @@
 %
 function params = set_parameters(mode, varargin)
 
-mu = 11; % Default input value
+mu = 10; % Default input value
 
 if nargin < 1
     mode = 'alpha';

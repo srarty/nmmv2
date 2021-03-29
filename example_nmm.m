@@ -18,8 +18,8 @@ FIX_PARAMS = false;	% Fix input and alpha parameters to initial conditions
 
 PCRB = false;       % Compute the PCRB (true or false)
 REAL_DATA = false;  % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
-TRUNCATE = false;   % If true, the real data from recordings is truncated from sample 1 to 'N'
-SCALE_DATA = false;  % Scale Raw data to match dynamic range of the membrane potentials in our model
+TRUNCATE = true;   % If true, the real data from recordings is truncated from sample 1 to 'N'
+SCALE_DATA = true;  % Scale Raw data to match dynamic range of the membrane potentials in our model
 
 relativator = @(x)sqrt(mean(x.^2,2));% @(x)(max(x')-min(x'))'; % If this is different to 1, it calculates the relative RMSE dividing by whatever this value is.
 % -----------
@@ -121,7 +121,7 @@ H = H.*1; % Scale the observation matrix if needed
 % Scale
 H = H/nmm.params.scale;
 
-R = 1^-3*eye(1);
+R = 1e-1*eye(1);
 
 w = mvnrnd(zeros(size(H,1),1),R,N)';
 y = H*x + w;
@@ -185,7 +185,7 @@ if REAL_DATA
     % Load real data from .mat :
     load('./data/Seizure_1.mat');  % change this path to load alternative data
     y = Seizure(:,1)';
-    params.dt = T/length(y);
+    params.dt = 1e-3*T/length(y);
     if TRUNCATE
         y = y(1:N);
     end
@@ -302,7 +302,7 @@ if ~REAL_DATA
             subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
             % Estimation
             plt(Phat(j,i,:),''); hold on;
-%             xlim([0 0.2]);
+            xlim([0.2 5]);
 %             ylim([-100000 100000]);
         end
     end
@@ -373,6 +373,16 @@ else
 %     legend({'EKF' 'Analytic'});
     legend({'Analytic'});
     subplot(2,4,1);title('Covariance matrix (P) - Diagonal'); 
+    
+    %% Covariance of alpha vectors
+    figure
+    for i = 1:NAugmented
+        for j = 1:NAugmented
+            subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
+            % Estimation
+            plt(Phat(j,i,:),''); hold on;
+        end
+    end
 end
 
 %% Compute the posterior Cramer-Rao bound (PCRB)

@@ -165,17 +165,16 @@ switch mode
         P7 = E_x_gx;% F*E_x_gx_1'; % This is E_x_gx = E[x_e *  g(x_i)] and E[x_i *  g(x_e)]? equation 22 SKF_Derivation_Prob
                 
         P8 = E_x_gx';% E_gx_x;% E_x_gx_2*F'; % This is the transpose of P7
-        
-        %% Output:
-        % TODO: Check the 1's and 0's are correctly placed in Egxgx
-
-        analytic_cov = P1 + P3 + P4 + P5 + P6;% + P7 + P8;
-        
+                        
         % P7 and P8 are covered by the following lines (?)
         % Missing covariance terms (updates alpha params):
         q2 = Upsilon.*(Bxi - dCPB.*beta.*gamma.^2 *2);
         AP = A*P;        
         Phi = ones(NStates,1)*q2'.*(AP*C_inhibit(z_idx,:)') + ones(NStates,1)*Xi'.*(AP*B(z_idx,:)');
+                
+        %% Output:
+        % TODO: Check the 1's and 0's are correctly placed in Egxgx
+        analytic_cov = P1 + P3 + P4 + P5 + P7 + P8;
         analytic_cov(:,z_idx) = analytic_cov(:,z_idx) + Phi;
         analytic_cov(z_idx,:) = analytic_cov(z_idx,:) + Phi';
         

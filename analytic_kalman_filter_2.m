@@ -47,8 +47,8 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,
     NStates = length(m0); % Number of states
     v = mvnrnd(zeros(NStates,1),Q,NSamples)'; % Measurement noise
     
-    scale_kf = 1/10; % Factor to which the derivative states (2,4,...) are scaled to mantain all states within a range of magnitudes
-    scale_range = [1:2:4 5 6 7];% 6 7];%, 5, 6, 7]; % 1:2:NStates
+    scale_kf = 1/1; % Factor to which the derivative states (2,4,...) are scaled to mantain all states within a range of magnitudes
+    scale_range = [1:2:4 5 6 7];%, 5, 6, 7]; % 1:2:NStates
     
     % Initialize mean and covariance.
     % Mean:
