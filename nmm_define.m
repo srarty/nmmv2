@@ -88,5 +88,6 @@ nmm.C = C;
 nmm.x0 = x;
 nmm.P0 = P;
 nmm.params = params;
+nmm.options = struct;
 
 end % end function - nmm_define

@@ -27,16 +27,29 @@ alpha_idx   = [6 7];
 NStates = length([v_idx z_idx u_idx alpha_idx]);
 NSynapses = length(v_idx);
 
+% Options]
+MONTECARLO = false; % (Default) montecarlo disabled, P6 is calculated analytically, unless nmm.options.P6_montecarlo exists and is set as true
+if isfield(nmm.options, 'P6_montecarlo'), MONTECARLO = nmm.options.P6_montecarlo; end % P6 computation (montecarlo or analytical)
+
+ALPHA_DECAY = false; 
+if isfield(nmm.options, 'ALPHA_DECAY'), ALPHA_DECAY = nmm.options.ALPHA_DECAY; end 
+
 % The parameters
 dt          = nmm.params.dt;
 e_0         = nmm.params.e0;
-r           = nmm.params.r;	% varsigma
-v0          = nmm.params.v0; % Threshold
-decay_e     = nmm.params.decay_e; % inverse time constants (excitatory)
-decay_i     = nmm.params.decay_i; % (inhibitory)
-alpha_ei    = nmm.params.alpha_ei; % synaptic gains (excitatory)
-alpha_ie    = nmm.params.alpha_ie; % (inhibitory)
-u           = nmm.params.u;	% mean input firing rate.
+r           = nmm.params.r;         % varsigma
+v0          = nmm.params.v0;        % Threshold
+decay_e     = nmm.params.decay_e;   % inverse time constants (excitatory)
+decay_i     = nmm.params.decay_i;   % (inhibitory)
+alpha_ei    = nmm.params.alpha_ei;  % synaptic gains (excitatory)
+alpha_ie    = nmm.params.alpha_ie;  % (inhibitory)
+u           = nmm.params.u;         % mean input firing rate.
+
+% Implement exponential decay on alpha - params
+if ALPHA_DECAY
+    x(alpha_idx(1)) = x(alpha_idx(1)) * (0.99^(dt*decay_e/10)); % alpha_e; % Exponential decay implemented
+    x(alpha_idx(2)) = x(alpha_idx(2)) * (0.99^(dt*decay_e/10)); %alpha_i; % Exponential decay implemented
+end
 
 % The (augmented) states vector
 v_e     = x(1); % Excitatory
@@ -98,7 +111,7 @@ switch mode
         
         % Nonlinear component of expectation
         % E[g(x)] is E_gx, or E[phi(E)]
-        E_gx = phi; % non_linear_sigmoid(C*x,r,v0)
+        E_gx = phi_c; % non_linear_sigmoid(C*x,r,v0)
         
         CPC = C(z_idx,:)*P*C(z_idx,:)';
         dCPB = diag(C(z_idx,:)*P*B(z_idx,:)');
@@ -112,7 +125,7 @@ switch mode
         psi = Bxi.*Xi + dCPB.*Upsilon;                              % E[ Bxi_t o g(Cxi_t) ]
         
         %% Analytic mean
-        analytic_mean = A*x;                                            % m is for minus (prior (or previous a priori)), p for plus (a posteriori)
+        analytic_mean = A*x;
         analytic_mean(2:2:2*NSynapses) = analytic_mean(2:2:2*NSynapses) + psi;
         
         % analytic_mean = A*x + B*x.*phi; % Matrices B and C are implicit in E_gx
@@ -122,36 +135,37 @@ switch mode
         P1 = A*P*A'; % P2 = Q; % Q is added in analytic_kalman_filter_2 after calling nmm function
         
         %% P3 = -E[phi(E)]E[phi(E)'], this is, E[E_phi(E)] = E_gx 
-        P3_ = -E_gx*E_gx';
-        P3 = zeros(NStates);
-        P3(z_idx,z_idx) = P3_;
+%         P3_ = -E_gx*E_gx';
+%         P3 = zeros(NStates);
+%         P3(z_idx,z_idx) = P3_;
+        P3 = -E_gx*E_gx';
         
         %% P4 = -A*E_hat*E[phi(E)'] 
-        P4_ = -x(z_idx) * E_gx'; % -A*x*E_gx';
+        P4_ = -x(z_idx) * E_gx(z_idx)'; % -A*x*E_gx';
         P4 = zeros(NStates);
-        P4(z_idx,z_idx) = P4_;
+        P4(z_idx,alpha_idx) = diag(diag(P4_));
         
         %% P5 = -E[phi(E)](A*E_hat)' 
-        P5_ = -E_gx * x(z_idx)';% -E_gx*(A*x)';
+        P5_ = -E_gx(z_idx) * x(z_idx)';% -E_gx*(A*x)';
         P5 = zeros(NStates);
-        P5(z_idx,z_idx) = P5_;
+        P5(alpha_idx,z_idx) = diag(diag(P5_));
         
         %% P6 = E[phi(E)phi(E)'] 
-        P6_ =  E_gx_gx(x, P, u, v0, r, false); % All the values of P (for all the states) % Do I need the dt? % This is E_gx_gx or E[g(x)g(x)] equation 25 to 30 SKF_Derivation_Prob
+        P6_ =  E_gx_gx(x, P, u, v0, r, MONTECARLO); % All the values of P (for all the states) % Do I need the dt? % This is E_gx_gx or E[g(x)g(x)] equation 25 to 30 SKF_Derivation_Prob
         P6 = zeros(NStates);
-        P6(z_idx,z_idx) = P6_;
+        P6(z_idx,z_idx) = diag(diag(P6_));
                 
         
         %% P7 and P8 
         % Question: Do this term need to be multiplied by dt?         
 
         E_x_gx = [0                     0                          0                           0                    0  0  0; ...
-                  0    E_xi_gxj(x(1),x(1),v0,P(1,1), P(1,1),r)     0        E_xi_gxj(x(1),x(3),v0,P(3,3), P(1,3),r) 0  0  0; ...
-                  0                     0                          0                           0                    0  0  0; ...
-                  0    E_xi_gxj(x(3),x(1),v0,P(1,1), P(3,1),r)     0        E_xi_gxj(x(3),x(3),v0,P(3,3), P(3,3),r) 0  0  0; ...
                   0                     0                          0                           0                    0  0  0; ...
                   0                     0                          0                           0                    0  0  0; ...
-                  0                     0                          0                           0                    0  0  0];
+                  0                     0                          0                           0                    0  0  0; ...
+                  0                     0                          0                           0                    0  0  0; ...
+                  0    E_xi_gxj(x(1),x(3),v0,P(3,3), P(1,3),r)     0                           0                    0  0  0; ...
+                  0                     0                          0        E_xi_gxj(x(3),x(1),v0,P(1,1), P(3,1),r) 0  0  0];
         
         %{
         E_x_gx = zeros(size(x,1));
@@ -166,7 +180,7 @@ switch mode
                 
         P8 = E_x_gx';% E_gx_x;% E_x_gx_2*F'; % This is the transpose of P7
                         
-        % P7 and P8 are covered by the following lines (?)
+        % P4, P5, P7 and P8 are covered by the following lines
         % Missing covariance terms (updates alpha params):
         q2 = Upsilon.*(Bxi - dCPB.*beta.*gamma.^2 *2);
         AP = A*P;        
@@ -174,7 +188,8 @@ switch mode
                 
         %% Output:
         % TODO: Check the 1's and 0's are correctly placed in Egxgx
-        analytic_cov = P1 + P3 + P4 + P5 + P7 + P8;
+        analytic_cov = P1 + P3 + P6 + P4 + P5 + P7 + P8;
+%         analytic_cov = P1 + P3 + P6;% + P4 + P5 + P7 + P8;
         analytic_cov(:,z_idx) = analytic_cov(:,z_idx) + Phi;
         analytic_cov(z_idx,:) = analytic_cov(z_idx,:) + Phi';
         

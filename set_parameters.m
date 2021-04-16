@@ -2,7 +2,7 @@
 %
 function params = set_parameters(mode, varargin)
 
-mu = 10; % Default input value
+mu = 11; % Default input value
 
 if nargin < 1
     mode = 'alpha';
@@ -24,7 +24,7 @@ switch mode
         params.decay_i = 50; % (1/tau_i)
 
         params.alpha_ei = 3.25;% 3.25;     % Gains (a_ei = excitatory)
-        params.alpha_ie = 6.25;%6.25;%6.25;%22;%12.5;  % (a_ie = inhibitory)
+        params.alpha_ie = 22;%6.25;%6.25;%22;%12.5;  % (a_ie = inhibitory)
 
         params.u = mu;%11;%220;%15;%11;        % mean input mem potential
 

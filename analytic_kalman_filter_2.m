@@ -30,18 +30,24 @@
 % Pip Karoly, Sep 2020
 % Artemio, Jan 2021
 %
-function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,m0,P0,varargin)
+function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,varargin)
     % Input arguments
-    if nargin > 9
+    if nargin > 7
         integration_method = varargin{1};
-        nn = 1; if nargin >10, nn = varargin{2}; end % nn is the integration time step ratio for runge-kutta integration. nn = fix(dT/dt), dT = sampling, dt = integrtion time step
-        verbose = true; if nargin >11, verbose = varargin{3}; end
+        nn = 1; if nargin >8, nn = varargin{2}; end % nn is the integration time step ratio for runge-kutta integration. nn = fix(dT/dt), dT = sampling, dt = integrtion time step
+        verbose = true; if nargin >9, verbose = varargin{3}; end
     else
         integration_method = 'euler'; % 'euler' or 'runge'
     end
     
+    % Options
+    ALPHA_KF_LBOUND = false; if isfield(nmm.options, 'ALPHA_KF_LBOUND'), ALPHA_KF_LBOUND = nmm.options.ALPHA_KF_LBOUND; end % Lower bound on alpha parameters
+    ALPHA_KF_UBOUND = false; if isfield(nmm.options, 'ALPHA_KF_UBOUND'), ALPHA_KF_UBOUND = nmm.options.ALPHA_KF_UBOUND; end % Upper bound on alpha parameters (needs the lower bound to be true)
+    
     r = nmm.params.r;
     v0 = nmm.params.v0;
+    m0 = nmm.x0;
+    P0 = nmm.P0;
     
     NSamples = length(y); % Number of samples. Should be equal to Ns, but setting it to lenght of the observed EEG
     NStates = length(m0); % Number of states
@@ -79,86 +85,16 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,
     % Progress bar
     if verbose, wbhandle = waitbar(0, 'Analytic Kalman Filter...'); end
     for n = 1:NSamples-1
-        % Prediction step
-        %-------------- start prediction
-        if strcmpi('euler', integration_method)
-            % Euler Integration
-            
-%             [x_hat(:,n+1), P_hat(:,:,n+1)] = prop_mean_and_cov(2,NStates,1,...
-%                 nmm.A, nmm.B, nmm.C, P_hat_init, x_hat_init, r, v0, Q); 
-            [x_hat(:,n+1), P_hat(:,:,n+1), fe(n+1), fi(n+1)] = f_(x_hat(:,n), P_hat(:,:,n)); % [x_hat(:,n+1), P_hat(:,:,n+1)] = f_(x_hat(:,n), zeros(size(P0)));
-            P_hat(:,:,n+1) = P_hat(:,:,n+1) + Q;
-            
-        elseif strcmpi('runge', integration_method)
-            % Runge-Kutta Integration
-            
-            h = 0.25; % step size (number of samples)
-            s1 = nan(NStates, NSamples-1);	s2 = nan(NStates, NSamples-1);	s3 = nan(NStates, NSamples-1);	s4 = nan(NStates, NSamples-1);
-            p1 = nan(NStates);	p2 = nan(NStates);	p3 = nan(NStates);	p4 = nan(NStates);
-
-            x_ = x_hat(:,n); % Change of variable for ease in notation
-            P_ = P_hat(:,:,n); % "
-
-            for i = 1:nn
-                [s1, p1] = f_(x_, P_);           % F(t_n, y_n)
-                s1 = (s1 - x_);            % Fix the addition (x_ is added within f_(.), but we don't want it to be added)
-                p1 = (p1 - P_);
-
-                [s2, p2] = f_(x_ + h*s1/2, P_ + h*p1/2); % F(t_n + h/2, y_n+h*s1/2)
-                s2 = (s2 - (x_ + h*s1/2));   
-                p2 = (p2 - (P_ + h*p1/2));
-
-                [s3, p3] = f_(x_ + h*s2/2, P_ + h*p2/2); % F(t_n + h/2, y_n+h*s2/2)
-                s3 = (s3 - (x_ + h*s2/2)); 
-                p3 = (p3 - (P_ + h*p2/2));
-
-                [s4, p4] = f_(x_ + h*s3, P_ + h*p3);     % F(t_n + h, y_n+h*s3)
-                s4 = (s4 - (x_ + h*s3));
-                p4 = (p4 - (P_ + h*p3));
-
-                x_ = x_ + h*(s1 + 2*s2 + 2*s3 + s4)/6;
-                P_ = P_ + h*(p1 + 2*p2 + 2*p3 + p4)/6;
+        try % Try catch on the whole for loop to prevent issues with the progress bar
+            % Compute 1 iteration of the analytic extended kalman filter
+            [x_hat(:,n+1), P_hat(:,:,n+1), K(:,n+1), fe(:,n+1), fi(:,n+1)] = akf_iterate(x_hat(:,n), P_hat(:,:,n), Q, R, y(n+1), H, NStates, NSamples, f_, scale_kf, scale_range,ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, integration_method);
+        
+        catch ME % Try catc around the whole for loop to make sure we close the progress bar in case there is an error during execution.
+            if exist('wbhandle','var')
+                delete(wbhandle)
             end
-
-            x_hat(:,n+1) = x_;
-            P_hat(:,:,n+1) = P_ + Q;
-        else
-            error('Invalid integration method');
+            rethrow(ME);
         end
-        %-------------- end prediction
-        
-        % Scale derivatives (divide by a factor)
-        x_hat(scale_range,n+1) = x_hat(scale_range,n+1)./scale_kf;
-        P_hat(scale_range, scale_range, n+1) = P_hat(scale_range, scale_range, n+1)./scale_kf;        
-        y(n+1) = y(n+1)./scale_kf;
-        
-        % Update step
-        K(:,n+1) = P_hat(:,:,n+1)*H' / ((H*P_hat(:,:,n+1)*H' + R)); % K = P_hat(:,:,n+1)*H' * inv((H*P_hat(:,:,n+1)*H' + R));
-        x_hat(:,n+1) = x_hat(:,n+1) + K(:,n+1)*(y(:,n+1)-H*x_hat(:,n+1));
-        P_hat(:,:,n+1) = (eye(length(x_hat_init))-K(:,n+1)*H)*P_hat(:,:,n+1); % P_k+ depends on K
-        % Use following option to avoid calculating K.
-        %P_hat(:,:,n+1) = inv(inv(P_hat(:,:,n+1)) + H'*inv(R)*H); % P_k+ does not depend on K
-        
-        % Force symmetry on P_hat
-        P_hat(:,:,n+1) = (P_hat(:,:,n+1) + P_hat(:,:,n+1)')/2;
-        % Check eigenvalues
-        [~,flag] = chol(P_hat(:,:,n+1));
-        if flag
-            % If any is negative, find the nearest Semipositve Definite
-            % matrix
-            [P_hat(:,:,n+1), k]= nearestSPD(P_hat(:,:,n+1)); % Nearest SPD, Higham (1988) - Parvin's method
-            if k == -1
-                % Infinite loop in the nearestSPD script. No SPD matrix
-                % found
-                disp(['Couldn''t find nearest SPD at t = ' num2str(n)]);
-            end
-        end
-        
-        % Rescale derivatives back (multiply by scale factor)
-        x_hat(scale_range,n+1) = x_hat(scale_range,n+1).*scale_kf;
-        P_hat(scale_range, scale_range, n+1) = P_hat(scale_range, scale_range, n+1).*scale_kf; 
-        y(n+1) = y(n+1).*scale_kf;
-        
         % Update progress bar
         if verbose, try wbhandle = waitbar(n/NSamples, wbhandle); catch, delete(wbhandle); error('Manually stopped'); end, end
     end

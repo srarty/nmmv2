@@ -5,30 +5,40 @@
 close all
 clear
 
-%% Options --
+%% Options -------------------------------------------------------------- %
 NStates = 4; % Number of states
 NInputs = 1; % Number of external inputs (u)
 NParams = 2; % Number of synaptic strength parameters (alpha_ie, alpha_ei, etc...)
 NAugmented = NStates + NInputs + NParams; % Total size of augmented state vector
 
-ESTIMATE = true;    % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
-REMOVE_DC = false;  % Remove DC offset from simulated observed EEG
-ADD_NOISE = true;	% Add noise to the forward model
-FIX_PARAMS = false;	% Fix input and alpha parameters to initial conditions
+ESTIMATE        = true;     % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
+PCRB            = false;    % Compute the PCRB (true or false)
+REAL_DATA       = false;     % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
+TRUNCATE        = 5000;    % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'
+SCALE_DATA      = true;     % Scale Raw data to match dynamic range of the membrane potentials in our model
+INTERPOLATE     = 3;        % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == 0.
 
-PCRB = false;       % Compute the PCRB (true or false)
-REAL_DATA = false;  % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
-TRUNCATE = true;   % If true, the real data from recordings is truncated from sample 1 to 'N'
-SCALE_DATA = true;  % Scale Raw data to match dynamic range of the membrane potentials in our model
+REMOVE_DC       = false;    % Remove DC offset from simulated observed EEG
+ADD_NOISE       = true;     % Add noise to the forward model's states
+
+ALPHA_KF_LBOUND  = true;    % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
+ALPHA_KF_UBOUND  = 0;    % Upper bound on alpha in the Kalman Filter (integer, if ~=0, the upper bound is ALPHA_KF_UBOUND)
+ALPHA_DECAY     = false;    % Exponential decay of alpha-params
+FIX_PARAMS      = false;    % Fix input and alpha parameters to initial conditions
+RANDOM_ALPHA    = false;    % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
+MONTECARLO      = false;    % Calculate term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
+
+
 
 relativator = @(x)sqrt(mean(x.^2,2));% @(x)(max(x')-min(x'))'; % If this is different to 1, it calculates the relative RMSE dividing by whatever this value is.
-% -----------
+% ----------------------------------------------------------------------- %
 
 %% Initialization
 % params = set_parameters('alpha', mu); % Set params.u from the input argument 'mu' of set_params
 params = set_parameters('alpha');       % Chose params.u from a constant value in set_params
 
 N = 5000;             	% number of samples
+if (TRUNCATE && REAL_DATA), N = TRUNCATE; end % If TRUNCATE ~=0, truncate to N
 dT = params.dt;         % sampling time step (global)
 dt = 1*dT;            	% integration time step
 nn = fix(dT/dt);      	% (used in for loop for forward modelling) the integration time step can be small that the sampling (fix round towards zero)
@@ -66,6 +76,8 @@ x0(NStates+1:end) = [u; alpha];
 
 % Initialize covariance matrix
 P0 = 1e2*eye(NAugmented);
+% Make P0 different for z-values
+P0([2 4],[2 4]) = P0([2 4],[2 4]) * 50;
 P = zeros(NAugmented, NAugmented, N);
 P(:,:,1) = P0;
 
@@ -75,6 +87,12 @@ f_e = zeros(1,N); % Firing rate of the excitatory neurons
 
 % Define the model
 nmm = nmm_define(x0, P0, params);
+nmm.options.P6_montecarlo = MONTECARLO;
+nmm.options.ALPHA_DECAY = ALPHA_DECAY;
+nmm.options.ALPHA_KF_UBOUND = ALPHA_KF_UBOUND;
+nmm.options.ALPHA_KF_LBOUND = ALPHA_KF_LBOUND;
+
+% Initialize states
 x0 = nmm.x0;
 x = zeros(NAugmented,N);
 x(:,1) = x0;
@@ -101,7 +119,7 @@ Q = 10^-3.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha dri
 % Initialise random number generator for repeatability
 rng(0);
 
-v = 10e-3.*mvnrnd(zeros(NAugmented,1),Q,N)';
+v = 10e-1.*mvnrnd(zeros(NAugmented,1),Q,N)';
 
 % Generate trajectory again with added noise
 % Euler-Maruyama integration
@@ -186,27 +204,48 @@ if REAL_DATA
     load('./data/Seizure_1.mat');  % change this path to load alternative data
     y = Seizure(:,1)';
     params.dt = 1e-3*T/length(y);
+    
     if TRUNCATE
         y = y(1:N);
     end
+    
     if SCALE_DATA
         y = y*6/50;
     end
-    t = params.dt:params.dt:params.dt*length(y);
+    
+    if INTERPOLATE
+        y_ = y; % Change of variable to keep the original recording
+        y = interp(y_,INTERPOLATE); % Upsample raw data with interpolated values
+        t = (params.dt:params.dt:params.dt*length(y))./INTERPOLATE;
+    else    
+        t = params.dt:params.dt:params.dt*length(y);
+    end    
+    
 end
 
 %% Run EKF for this model
 % Prior distribution (defined by m0 & P0)
 m0 = mean(x(:,ceil(size(x,2)/2):end),2);%mean();% x0;
 m0(5) = mean(y(ceil(size(y,2)/2):end));
-m0(6) = x0(6) + x0(6)*(rand()-0.5);
-m0(7) = x0(7) + x0(7)*(rand()-0.5);
+m0(6) = x0(6) + RANDOM_ALPHA * (x0(6)*(rand()-0.5));
+m0(7) = x0(7) + RANDOM_ALPHA * (x0(7)*(rand()-0.5));
+nmm.x0 = m0; % Update initial value in nmm, i.e. nmm.x0
+
 % P0 = 1e2*eye(NAugmented); % P0 will use the same initial value as the
 % forward model
 % P0(NAugmented - NParams + 1 : end, NAugmented - NParams + 1 : end) = 1e3*eye(NParams);
 
 % Apply EKF filter
-[m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,[],nmm,H,Q,R,m0,P0,'euler');
+try
+    [m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,[],nmm,H,Q,R,'euler');
+catch ME
+    if strcmp('Manually stopped', ME.message)
+        disp('Kalman filter manually stopped by user.');
+        return
+    else
+        rethrow(ME);
+    end
+end
 
 % y_ekf = H*m_;% + w;
 y_analytic = H*m;% + w;
@@ -432,7 +471,7 @@ for r=1:num_trials
     % Apply EKF filter
 %     m = extended_kalman_filter_2(z,f,F,H,Q,R,m0,P0);
     try
-        m_ = analytic_kalman_filter_2(z,f_,F_,nmm,H,Q,R,m0,P0,'euler',1,false);
+        m_ = analytic_kalman_filter_2(z,f_,F_,nmm,H,Q,R,'euler',1,false);
 %         m__ = analytic_kalman_filter_2(z,f_,F_,H,Q,R,m0,P0,'runge');
     catch E
         if strcmp('MATLAB:erf:notFullReal', E.identifier) ||...
@@ -586,7 +625,7 @@ if PCRB
     if ~REAL_DATA
         semilogy(t,sum(rmse_),'x-')
     else
-        semilogy(t,rmse,'x-')
+        semilogy(t,rmse_,'x-')
     end
     hold on;
     % semilogy(t,sum(mse__),'x-')
