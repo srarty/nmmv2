@@ -4,9 +4,6 @@
 % Inputs: y - measurements
 %         f - transition function. For a regular Kalman fiter use 
 %                 @(x)(F*x), where F is the transition matrix
-%         F - transition matrix function (a function that takes the
-%                 current state and returns the Jacobian). For a regular
-%                 Kalman fiter use @(x)F, where F is the transition matrix
 %         nmm - stores information about the NMM, includes params and 
 %                 state-space representation (this is the output of 
 %                 nmm_define)
@@ -21,7 +18,7 @@
 %                 dT = sampling, dt = integrtion time step
 %         verbose (optional) - If true [default], shows a progress bar 
 %                 modal window
-%
+%         
 % Outputs: x_hat - the posterior mean (the estimated state)
 %          P_hat - the posterior covariance
 %          K - The Kalman filter gain matrix
@@ -30,19 +27,22 @@
 % Pip Karoly, Sep 2020
 % Artemio, Jan 2021
 %
-function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,varargin)
+function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,nmm,H,Q,R,varargin)
     % Input arguments
-    if nargin > 7
+    if exist('varargin','var') && length(varargin) > 0
         integration_method = varargin{1};
-        nn = 1; if nargin >8, nn = varargin{2}; end % nn is the integration time step ratio for runge-kutta integration. nn = fix(dT/dt), dT = sampling, dt = integrtion time step
-        verbose = true; if nargin >9, verbose = varargin{3}; end
+        nn = 1; if length(varargin) > 1, nn = varargin{2}; end % nn is the integration time step ratio for runge-kutta integration. nn = fix(dT/dt), dT = sampling, dt = integrtion time step
+        verbose = true; if length(varargin) > 2, verbose = varargin{3}; end
+        % DO_FILTER = true; if length(varargin) > 3, DO_FILTER = varargin{3}; end % Not in use. Use nmm.options.KF_TYPE instead
     else
         integration_method = 'euler'; % 'euler' or 'runge'
     end
     
-    % Options
+    % Options (retrieving from nmm struct)
     ALPHA_KF_LBOUND = false; if isfield(nmm.options, 'ALPHA_KF_LBOUND'), ALPHA_KF_LBOUND = nmm.options.ALPHA_KF_LBOUND; end % Lower bound on alpha parameters
     ALPHA_KF_UBOUND = false; if isfield(nmm.options, 'ALPHA_KF_UBOUND'), ALPHA_KF_UBOUND = nmm.options.ALPHA_KF_UBOUND; end % Upper bound on alpha parameters (needs the lower bound to be true)
+    KF_TYPE = 'extended'; if isfield(nmm.options, 'KF_TYPE'), KF_TYPE = nmm.options.KF_TYPE; end % String: 'unscented', 'extended' (default) or 'none' 
+    if strcmp('none', KF_TYPE), DO_FILTER = false; else, DO_FILTER = true; end % If KF_TYPE is 'none', the estimation calls akf_iterate, but does not compute the KF part
     
     r = nmm.params.r;
     v0 = nmm.params.v0;
@@ -54,7 +54,7 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,
     v = mvnrnd(zeros(NStates,1),Q,NSamples)'; % Measurement noise
     
     scale_kf = 1/1; % Factor to which the derivative states (2,4,...) are scaled to mantain all states within a range of magnitudes
-    scale_range = [1:2:4 5 6 7];%, 5, 6, 7]; % 1:2:NStates
+    scale_range = [1:2:4];% 5 6 7];%, 5, 6, 7]; % 1:2:NStates
     
     % Initialize mean and covariance.
     % Mean:
@@ -86,12 +86,25 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,F_,nmm,H,Q,R,
     if verbose, wbhandle = waitbar(0, 'Analytic Kalman Filter...'); end
     for n = 1:NSamples-1
         try % Try catch on the whole for loop to prevent issues with the progress bar
-            % Compute 1 iteration of the analytic extended kalman filter
-            [x_hat(:,n+1), P_hat(:,:,n+1), K(:,n+1), fe(:,n+1), fi(:,n+1)] = akf_iterate(x_hat(:,n), P_hat(:,:,n), Q, R, y(n+1), H, NStates, NSamples, f_, scale_kf, scale_range,ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, integration_method);
-        
-        catch ME % Try catc around the whole for loop to make sure we close the progress bar in case there is an error during execution.
+            switch KF_TYPE
+                case 'unscented'
+                    % Compute 1 iteration of the analytic extended kalman filter
+                    [x_hat(:,n+1), P_hat(:,:,n+1), K(:,n+1), fe(:,n+1), fi(:,n+1)] = ukf_iterate(x_hat(:,n), P_hat(:,:,n), Q, R, y(n+1), H, ...
+                        NStates, f_, scale_kf, scale_range, ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, integration_method, DO_FILTER);
+                otherwise
+                    % Analytic extended kalman filter. DO_FILTER is true if
+                    % 'extended' is chosen, DO_FILTER is false if anything
+                    % else is chosen
+                    [x_hat(:,n+1), P_hat(:,:,n+1), K(:,n+1), fe(:,n+1), fi(:,n+1)] = akf_iterate(x_hat(:,n), P_hat(:,:,n), Q, R, y(n+1), H, ...
+                        NStates, f_, scale_kf, scale_range, ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, integration_method, DO_FILTER);
+            end
+                    
+        catch ME % Try catch around the whole for loop to make sure we close the progress bar in case there is an error during execution.
             if exist('wbhandle','var')
                 delete(wbhandle)
+            end
+            if strcmp('Couldn''t find the nearest SPD', ME.message)
+                disp([ME.message ' at time t = ' num2str(nmm.params.dt * n) ' s | sample = ' num2str(n)]);
             end
             rethrow(ME);
         end

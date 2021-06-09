@@ -1,14 +1,14 @@
 % NMM_DEFINE Neural Mass Model based on Jensen and Rit. Defines the state based representation of the model.
 %
 % Inputs:
-%   x - initial states
-%   P - initial covariance matrix
+%   x0 - initial states
+%   P0 - initial covariance matrix
 %   params - parameters defined by Jensen and Rit
 %
 % Outputs:
 %   nmm - (struct) the neural mass model
 %
-function nmm = nmm_define(x,P,params)
+function nmm = nmm_define(x0,P0,params)
 % Indexes
 v_idx = [1 3];
 z_idx = [2 4];
@@ -32,7 +32,7 @@ c1 = 1*c_constant;	% number of synapses
 c2 = 0.8*c_constant;
 
 % Number of augmented states
-xlen = length(x);
+xlen = length(x0);
 
 % Linear component of model
 A =     [1,                  dt*scale,      0,              0,          0,  0,  0; ...
@@ -46,18 +46,26 @@ A =     [1,                  dt*scale,      0,              0,          0,  0,  
      
 % B Matrix (Augmented parameters)                                                                
 %      
-% B =     [0,              0,          0,              0,          0,  0,  0; ...
-%          0               0,          0,              0           1,  1,  0; ...
-%          0,              0,          0,              0,          0,  0,  0; ...
-%          0,              0           0               0           0,  0,  1; ...
-%          0,              0,          0,              0,          0,  0,  0; ...
-%          0,              0,          0,              0,          0,  0,  0; ...
-%          0,              0,          0,              0,          0,  0,  0];
+% B =     [0,	0,	0,	0,	0,	0,	0; ...
+%          0,	0,	0,	0,	0,	1,	0; ...
+%          0,	0,	0,	0,	0,	0,	0; ...
+%          0,	0,	0,	0,	0,	0,	1; ...
+%          0,	0,	0,	0,	0,	0,	0; ...
+%          0,	0,	0,	0,	0,	0,	0; ...
+%          0,	0,	0,	0,	0,  0,  0];
 %
 B = zeros(xlen);
 B(z_idx, alpha_idx) = diag(ones(size(z_idx)));
 
 % C Matrix (Augmented)
+% C =     [0,	0,	0,	0,	0,	0,	0; ...
+%          0,	0,	1,	0,	1,	0,	0; ...
+%          0,	0,	0,	0,	0,	0,	0; ...
+%          1,	0,	0,	0,	0,	0,	0; ...
+%          0,	0,	0,	0,	0,	0,	0; ...
+%          0,	0,	0,	0,	0,	0,	0; ...
+%          0,	0,	0,	0,	0,  0,  0];
+%
 C = zeros(xlen);
 C(2,3) = 1; % inhibitory -> excitatory
 C(4,1) = 1; % excitatory -> inhibitory
@@ -77,16 +85,16 @@ input = scale*u;
 %       ~~~~~   ~~~~~~~~~~~~~~   ~~~~~~~~~
 %       input   synaptic gain    integral of kernel
 
-x(5) = input;
-x(6) = alpha_e;
-x(7) = alpha_i;
+x0(5) = input;
+x0(6) = alpha_e;
+x0(7) = alpha_i;
 
 nmm = struct;
 nmm.A = A;
 nmm.B = B;
 nmm.C = C;
-nmm.x0 = x;
-nmm.P0 = P;
+nmm.x0 = x0;
+nmm.P0 = P0;
 nmm.params = params;
 nmm.options = struct;
 

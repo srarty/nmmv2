@@ -6,39 +6,46 @@ close all
 clear
 
 %% Options -------------------------------------------------------------- %
+% TODO: compare y_prediction, y_real, etc, and figure out what to do with
+% that
 NStates = 4; % Number of states
 NInputs = 1; % Number of external inputs (u)
 NParams = 2; % Number of synaptic strength parameters (alpha_ie, alpha_ei, etc...)
 NAugmented = NStates + NInputs + NParams; % Total size of augmented state vector
 
-ESTIMATE        = true;     % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
-PCRB            = false;    % Compute the PCRB (true or false)
-REAL_DATA       = false;     % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
-TRUNCATE        = 5000;    % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'
-SCALE_DATA      = true;     % Scale Raw data to match dynamic range of the membrane potentials in our model
-INTERPOLATE     = 3;        % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == 0.
+ESTIMATE        = true;         % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
+PCRB            = 0;            % Compute the PCRB (false = 0, or true > 0) The number here defines the iterations for CRB and MSE
+REAL_DATA       = true;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
+TRUNCATE        = 10000;            % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'
+SCALE_DATA      = 6/50;         % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
+INTERPOLATE     = 0;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
 
-REMOVE_DC       = false;    % Remove DC offset from simulated observed EEG
-ADD_NOISE       = true;     % Add noise to the forward model's states
+REMOVE_DC       = false;        % Remove DC offset from simulated observed EEG
+ADD_NOISE       = true;         % Add noise to the forward model's states
+ADD_OBSERVATION_NOISE = true;	% Add noise to the forward model's states
 
-ALPHA_KF_LBOUND  = true;    % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
-ALPHA_KF_UBOUND  = 0;    % Upper bound on alpha in the Kalman Filter (integer, if ~=0, the upper bound is ALPHA_KF_UBOUND)
-ALPHA_DECAY     = false;    % Exponential decay of alpha-params
-FIX_PARAMS      = false;    % Fix input and alpha parameters to initial conditions
-RANDOM_ALPHA    = false;    % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
-MONTECARLO      = false;    % Calculate term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
+KF_TYPE         = 'unscented';  % String: 'unscented', 'extended' (default) or 'none'
+ANALYTIC_TYPE   = 'analytic';   % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
 
+ALPHA_KF_LBOUND  = false;       % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
+ALPHA_KF_UBOUND  = 0;%1e3;      % Upper bound on alpha in the Kalman Filter (integer, if ~=0, the upper bound is ALPHA_KF_UBOUND)
+ALPHA_DECAY     = false;        % Exponential decay of alpha-params
+FIX_PARAMS      = false;         % Fix input and alpha parameters to initial conditions
+RANDOM_ALPHA    = true;         % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
+MONTECARLO      = false;        % Calculatruee term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
 
-
-relativator = @(x)sqrt(mean(x.^2,2));% @(x)(max(x')-min(x'))'; % If this is different to 1, it calculates the relative RMSE dividing by whatever this value is.
+relativator = @(x)sqrt(mean(x.^2,2)); % @(x)(max(x')-min(x'))'; % If this is different to @(x)1, it calculates the relative RMSE dividing by whatever this value is.
 % ----------------------------------------------------------------------- %
+
+% Initialise random number generator for repeatability
+rng(0);
 
 %% Initialization
 % params = set_parameters('alpha', mu); % Set params.u from the input argument 'mu' of set_params
 params = set_parameters('alpha');       % Chose params.u from a constant value in set_params
 
-N = 5000;             	% number of samples
-if (TRUNCATE && REAL_DATA), N = TRUNCATE; end % If TRUNCATE ~=0, truncate to N
+N = 2000; % 148262; % Seizure 1 size: 148262;             	% number of samples
+if (TRUNCATE && REAL_DATA), N = TRUNCATE; end % If TRUNCATE ~=0, only take N = TRUNCATE samples of the recording or simulation
 dT = params.dt;         % sampling time step (global)
 dt = 1*dT;            	% integration time step
 nn = fix(dT/dt);      	% (used in for loop for forward modelling) the integration time step can be small that the sampling (fix round towards zero)
@@ -47,15 +54,15 @@ t = 0:dt:(N-1)*dt;
 % model structure
 % ~~~~~~~~~~~~~~~~
 %           u
-%           |  __
-%           | /  \
-%           |/   a_ie
-%      |    |     |
-%      v    E     I   ^
-%           |     |   |  direction of info
-%           |\   a_ei
-%           | \   |
-%           |  \_/
+%           |  ___
+%           | /   \
+%           |/    a_ie
+%      |    |      |
+%      v    E      I   ^
+%           |      |   |  direction of info
+%           |\    a_ei
+%           | \    |
+%           |  \__/
 %           v
 %
 % Populations:
@@ -71,7 +78,8 @@ alpha = [params.alpha_ie; params.alpha_ei]; % Parameters in the augmented state 
 
 % Initialise trajectory state
 x0 = zeros(NAugmented,1); % initial state
-x0(1:NStates) = mvnrnd(x0(1:NStates),10^1*eye(NStates));
+% x0(1:NStates) = mvnrnd(x0(1:NStates),10^1*eye(NStates)); % Random inital state
+x0 = params.v0*ones(size(x0));% x0([2 4]) = 0;
 x0(NStates+1:end) = [u; alpha];
 
 % Initialize covariance matrix
@@ -85,12 +93,17 @@ P(:,:,1) = P0;
 f_i = zeros(1,N); % Firing rate of the inhibitory neurons
 f_e = zeros(1,N); % Firing rate of the excitatory neurons
 
+
 % Define the model
 nmm = nmm_define(x0, P0, params);
-nmm.options.P6_montecarlo = MONTECARLO;
-nmm.options.ALPHA_DECAY = ALPHA_DECAY;
+% Pass options to model struct
+nmm.options.P6_montecarlo   = MONTECARLO;
+nmm.options.ALPHA_DECAY     = ALPHA_DECAY;
 nmm.options.ALPHA_KF_UBOUND = ALPHA_KF_UBOUND;
 nmm.options.ALPHA_KF_LBOUND = ALPHA_KF_LBOUND;
+nmm.options.KF_TYPE         = KF_TYPE;
+nmm.options.ANALYTIC_TYPE   = ANALYTIC_TYPE;
+
 
 % Initialize states
 x0 = nmm.x0;
@@ -101,8 +114,8 @@ x(:,1) = x0;
 f = @(x)nmm_run(nmm, x, [], 'transition');
 F = @(x)nmm_run(nmm, x, [], 'jacobian');
 % Analytic
-f_ = @(x,P)nmm_run(nmm, x, P,  'analytic');
-F_ = @(x,P)nmm_run(nmm, x, P,  'jacobian');
+f_ = @(x,P)nmm_run(nmm, x, P,  ANALYTIC_TYPE);
+F_ = @(x,P)nmm_run(nmm, x, P,  'jacobian'); % F_ - transition matrix function (a function that takes the current state and returns the Jacobian).
 
 %% Generate trajectory
 % Euler integration
@@ -113,22 +126,34 @@ end
 
 % Calculate noise covariance based on trajectory variance over time??
 %   Why noise on all states?
-Q = 10^-3.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
+Q = 1e-3*eye(NAugmented);
+% Q = 10^-3.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
 % Q(NStates+1 : end, NStates+1 : end) =  10e-3*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
-
-% Initialise random number generator for repeatability
-rng(0);
 
 v = 10e-1.*mvnrnd(zeros(NAugmented,1),Q,N)';
 
+% Get alphas from estimation
+estimation = load('estimation_ukf'); % Load estimation results from real data (Seizure 1)
+wbhandle = waitbar(0, 'Generating trajectory...'); % Loading bar
 % Generate trajectory again with added noise
 % Euler-Maruyama integration
 for n=1:N-1
-    [x(:,n+1), ~, f_i(n+1), f_e(n+1)] = f(x(:,n)); % Propagate mean
-    
-    if (FIX_PARAMS), x(NStates+1:end,n+1) = x0(NStates+1:end); end % Fixing the parameters
-    x(:,n+1) = x(:,n+1) + (ADD_NOISE * v(:,n)); % Add noise if the ADD_NOISE option is true.
+    try
+        [x(:,n+1), ~, f_i(n+1), f_e(n+1)] = f(x(:,n)); % Propagate mean
+
+        %if (FIX_PARAMS), x(NStates+1:end,n+1) = x0(NStates+1:end); end % Fixing the parameters, alternative, try this: % 
+        if (FIX_PARAMS), x(NStates+1:end,n+1)= estimation.m(NStates+1:end, n+1); end % Fixing the parameters to the result of a previous recording.
+        x(:,n+1) = x(:,n+1) + (ADD_NOISE * v(:,n)); % Add noise if the ADD_NOISE option is true.
+    catch ME % Try catch around the whole for loop to make sure we close the progress bar in case there is an error during execution.
+        if exist('wbhandle','var')
+            delete(wbhandle)
+        end
+    end
+    % Update progress bar
+    try wbhandle = waitbar(n/(N-1), wbhandle); catch, delete(wbhandle); error('Manually stopped: Forward model.'); end
 end
+% Remove progress bar
+delete(wbhandle);
 
 % Observation function (H = [1 0 0 0 1 0 0]) <- state x1 and parameter u
 % are in the observation matrix.
@@ -141,7 +166,7 @@ H = H/nmm.params.scale;
 
 R = 1e-1*eye(1);
 
-w = mvnrnd(zeros(size(H,1),1),R,N)';
+w = ADD_OBSERVATION_NOISE .* mvnrnd(zeros(size(H,1),1),R,N)';
 y = H*x + w;
 
 if REMOVE_DC
@@ -202,31 +227,53 @@ end
 if REAL_DATA
     % Load real data from .mat :
     load('./data/Seizure_1.mat');  % change this path to load alternative data
-    y = Seizure(:,1)';
+    Ch = 1; % Channel
+    y = Seizure(:,Ch)';
+    
+    % Check if the data contains a time stamp
+    if ~exist('T', 'var')
+        T = 4.0694e6; % Hardcoded data taken from Seizure_1.mat
+    end
+    % Define the time step
     params.dt = 1e-3*T/length(y);
-    
-    if TRUNCATE
+        
+    if TRUNCATE > 0
+        % Truncate from the beginning
         y = y(1:N);
+    elseif TRUNCATE < 0
+        % Truncate from end
+        y = y(end+N+1 : end);
     end
     
-    if SCALE_DATA
-        y = y*6/50;
-    end
-    
-    if INTERPOLATE
-        y_ = y; % Change of variable to keep the original recording
-        y = interp(y_,INTERPOLATE); % Upsample raw data with interpolated values
-        t = (params.dt:params.dt:params.dt*length(y))./INTERPOLATE;
-    else    
-        t = params.dt:params.dt:params.dt*length(y);
+    if SCALE_DATA %#ok<BDLGI> % Removes the warning for SCALE_DATA being constant
+        y = y * SCALE_DATA; %0.12;
     end    
-    
+end
+
+if INTERPOLATE
+    y_ = y; % Change of variable to keep the original recording
+    y = interp(y_,INTERPOLATE); % Upsample raw data with interpolated values
+    t_ = params.dt:params.dt:params.dt*length(y_); % Store original time series
+    t = (params.dt:params.dt:params.dt*length(y))./INTERPOLATE; % Upsampled time series
+    params.dt = params.dt/INTERPOLATE;
+    if ~REAL_DATA
+        % If not real data, i.e. simulated data, then interpolate the x as
+        % well
+        x_ = x; % Store original state vector
+        x = zeros(size(x,1), size(x,2) * INTERPOLATE);
+        for i = 1:size(x,1)
+            x(i,:) = interp(x_(i,:),INTERPOLATE); % Upsample raw data with interpolated values
+        end
+    end
+else
+    t_ = params.dt:params.dt:params.dt*length(y);
+    t = t_;
 end
 
 %% Run EKF for this model
 % Prior distribution (defined by m0 & P0)
-m0 = mean(x(:,ceil(size(x,2)/2):end),2);%mean();% x0;
-m0(5) = mean(y(ceil(size(y,2)/2):end));
+m0 = params.v0*ones(size(x0));% m0([2 4]) = 0; mean(x(:,ceil(size(x,2)/2):end),2); %
+m0(5) = 0;% mean(y(ceil(size(y,2)/2):end)); % x0(5);%32;%
 m0(6) = x0(6) + RANDOM_ALPHA * (x0(6)*(rand()-0.5));
 m0(7) = x0(7) + RANDOM_ALPHA * (x0(7)*(rand()-0.5));
 nmm.x0 = m0; % Update initial value in nmm, i.e. nmm.x0
@@ -237,7 +284,10 @@ nmm.x0 = m0; % Update initial value in nmm, i.e. nmm.x0
 
 % Apply EKF filter
 try
-    [m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,[],nmm,H,Q,R,'euler');
+    tic
+    [m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,nmm,H,Q,R,'euler');
+    toc_ = toc;
+    disp(['Kalman filter estimation took: ' num2str(toc_) ' seconds']);
 catch ME
     if strcmp('Manually stopped', ME.message)
         disp('Kalman filter manually stopped by user.');
@@ -277,7 +327,7 @@ if ~REAL_DATA
     axs = nan(NStates,1); % Axes handles to link subplots x-axis
     for i = 1:NStates
         axs(i) = subplot(NStates, 1, i);
-        plot(t(1:min(length(t),size(x,2))),x(i,1:min(length(t),size(x,2)))'); hold on;
+        plot(t_(1:min(length(t_),size(x,2))),x(i,1:min(length(t_),size(x,2)))'); hold on;
         plot(t,m(i,:)','--');
 %         plot(t,m_(i,:)','--');
     %     plot(t,m__(i,:)','--');
@@ -292,10 +342,11 @@ if ~REAL_DATA
     axs = nan(NAugmented - NStates,1); % Axes handles to link subplots x-axis
     for i = 1:NAugmented - NStates
         axs(i) = subplot(NAugmented - NStates, 1, i);
-        plot(t(1:min(length(t),size(x,2))),x(NStates + i,1:min(length(t),size(x,2)))'); hold on;
+        plot(t_(1:min(length(t_),size(x,2))),x(NStates + i,1:min(length(t_),size(x,2)))'); hold on;
         plot(t,m(NStates + i,:)','--');
-%         plot(t,m_(i,:)','--');
-    %     plot(t,m__(i,:)','--');
+        % plot(t,m_(i,:)','--');
+        % plot(t,m__(i,:)','--');
+        plot(t, zeros(size(t)), '--', 'Color', [0.8 0.8 0.8]);
         ylabel(['Parameter ' num2str(i)]);
     end
     linkaxes(axs, 'x');
@@ -305,13 +356,13 @@ if ~REAL_DATA
     %% Firing rates (Output of the nonlinearity)
     figure
     ax1 = subplot(2,1,1);
-    plot(t, f_e);
+    plot(t_, f_e);
     hold
     plot(t, fe_exp, '--');
     title('Sigmoid function output');
     ylabel('f_e');
     ax2 = subplot(2,1,2);
-    plot(t, f_i);
+    plot(t_, f_i);
     hold
     plot(t,fi_exp, '--');
     ylabel('f_i');
@@ -321,11 +372,12 @@ if ~REAL_DATA
     %% Covariance (Estimation)
     figure
     % plt = @(x,varargin)plot(t,squeeze(x)./max(abs(squeeze(x))),varargin{1});
-    plt = @(x,varargin)plot(t,squeeze(x),varargin{1});
+    plt = @(x,varargin)plot(t,squeeze(x),varargin{1}); % Estimation
+    plt_ = @(x,varargin)plot(t_,squeeze(x),varargin{1}); % Forward (time vector is different)
     for i = 1:NAugmented
         subplot(2,4,i)
         % Forward model
-        plt(P(i,i,:),'-'); hold on;
+        plt_(P(i,i,:),'-'); hold on;
         % Estimation
         plt(Phat(i,i,:),'--');hold on;
 %         plt(Phat_(i,i,:),'--');
@@ -357,11 +409,19 @@ else
     ax2=subplot(212);
     plot(t,y_analytic, '--', 'LineWidth', 2);hold on
     plot(t,y);
-    legend('Prediction','Observed ECoG'); % legend('EKF', 'Analytic (euler)','Observed EEG');
     linkaxes([ax1 ax2],'x');
     ylabel('ECoG');
     xlabel('Time (s)');
+    % Here, find and plot places where alpha's cross through zero
+    zci = @(v) find(diff(sign(v))); % Zero cross detector
+    try plot(t(zci(m(6,:))), max(y) + 1,'v', 'Color', [0.4 0.6 0.9], 'MarkerSize', 8, 'LineWidth', 2); catch, end
+    try plot(t(zci(m(7,:))), max(y) + 1,'v', 'Color', [0.8 0.4 0.1], 'MarkerSize', 8, 'LineWidth', 2); catch, end
+    % Rapid change in alpha
+    hdi = @(v) find(diff(abs(v)) > 30 * (mean(abs(diff(v))) + std(abs(diff(v)))) ~= 0);
+    try plot(t(hdi(m(6,:))), -(max(y) + 1),'^', 'Color', [0.4 0.6 0.9], 'MarkerSize', 8, 'LineWidth', 2); catch, end
+    try plot(t(hdi(m(7,:))), -(max(y) + 1),'^', 'Color', [0.8 0.4 0.1], 'MarkerSize', 8, 'LineWidth', 2); catch, end
     
+    legend('Prediction','Observed ECoG'); % legend('EKF', 'Analytic (euler)','Observed EEG');
     
     % Plot the 4 states
     figure
@@ -380,6 +440,7 @@ else
     for i = NStates+1:NAugmented
         axs(i-NStates) = subplot(NAugmented-NStates, 1, i-NStates);
         plot(t,m(i,:)','-');hold on;
+        plot(t, zeros(size(t)), '--', 'Color', [0.8 0.8 0.8]);
         ylabel(['Parameter ' num2str(i-NStates)]);
     end
     linkaxes(axs, 'x');
@@ -413,7 +474,7 @@ else
     legend({'Analytic'});
     subplot(2,4,1);title('Covariance matrix (P) - Diagonal'); 
     
-    %% Covariance of alpha vectors
+    % Covariance of alpha vectors
     figure
     for i = 1:NAugmented
         for j = 1:NAugmented
@@ -424,26 +485,41 @@ else
     end
 end
 
+% Nice placement of figures
+poss = [104, 562, 560, 420; 694, 563, 560, 420; 1288, 562, 560, 420; 107,  49, 560, 420; 693,  51, 560, 420; 1287,  50, 560, 420];
+for i = 1:6, figs{i}=figure(i); end
+for i = 1:6, figs{i}.Position = poss(i,:); end
+
 %% Compute the posterior Cramer-Rao bound (PCRB)
 if ~PCRB
     return
 else
-    M = 100;    % Number of Monte Carlo samples
-%     pcrb = sqrt(compute_pcrb_P(t,f,F,@(x)H,Q,R,m0,P0,M)); % Square root to compare it to the Root Mean Square Error
-    pcrb_analytic = sqrt(compute_pcrb_P_analytic(t,f_,F_,@(x)H,Q,R,m0,P0,M)) ./ relativator(x); % Divided by the range of the data to calculate the relative rmse % Square root to compare it to the Root Mean Square Error
-    % pcrb = compute_pcrb_P(t,f_,F,@(x)H,Q,R,m0,P0,M); % f_ for analytic KF
-    % pcrbx5 = compute_pcrb_P(t,f,F,@(x)H,Q,R,m0,P0.*5,M); % Changed initial condition, multiply P0 by 5
-    % pcrbd5 = compute_pcrb_P(t,f,F,@(x)H,Q,R,m0,P0./5,M); % Changed initial condition, divide P0 by 5
+    M = PCRB;    % Number of Monte Carlo samples % PCRB contains the number of iterations on the Cramer-Rao bound's calculation and the MSE
+    
+    try
+        pcrb_analytic = sqrt(compute_pcrb_P_analytic(t,f_,F_,H,Q,R,m0,P0,M,y, ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, KF_TYPE)) ./ relativator(x); % Divided by the range of the data to calculate the relative rmse % Square root to compare it to the Root Mean Square Error
+        % pcrb = sqrt(compute_pcrb_P(t,f,F,@(x)H,Q,R,m0,P0,M)); % Square root to compare it to the Root Mean Square Error
+        % pcrb = compute_pcrb_P(t,f_,F,@(x)H,Q,R,m0,P0,M); % f_ for analytic KF
+        % pcrbx5 = compute_pcrb_P(t,f,F,@(x)H,Q,R,m0,P0.*5,M); % Changed initial condition, multiply P0 by 5
+        % pcrbd5 = compute_pcrb_P(t,f,F,@(x)H,Q,R,m0,P0./5,M); % Changed initial condition, divide P0 by 5
+    catch E
+        if strcmp('Manually stopped', E.message)
+            disp('PCRB manually stopped by user.');
+            return
+        else
+            rethrow(E);
+        end
+    end
 end
 
 %% Compute the MSE of the extended Kalman filter
-num_trials = 100;
+num_trials = PCRB; % PCRB contains the number of iterations on the Cramer-Rao bound's calculation and the MSE
 if ~REAL_DATA
-    error = zeros(NAugmented,N);
-    error_ = zeros(NAugmented,N);
+    err = zeros(NAugmented,N * max(1,INTERPOLATE));
+    error_ = zeros(NAugmented,N * max(1,INTERPOLATE));
     % error__ = zeros(NAugmented,N);
 else
-    error = zeros(size(y));
+    err = zeros(size(y));
     error_ = zeros(size(y));
 end
 nps = 0; % Non-positive semidefinite P matrix, iteration counter for removal
@@ -471,11 +547,20 @@ for r=1:num_trials
     % Apply EKF filter
 %     m = extended_kalman_filter_2(z,f,F,H,Q,R,m0,P0);
     try
-        m_ = analytic_kalman_filter_2(z,f_,F_,nmm,H,Q,R,'euler',1,false);
+         m_ = analytic_kalman_filter_2(z,f_,nmm,H,Q,R,'euler',1,false,true);
 %         m__ = analytic_kalman_filter_2(z,f_,F_,H,Q,R,m0,P0,'runge');
     catch E
         if strcmp('MATLAB:erf:notFullReal', E.identifier) ||...
                 strcmp('stats:mvncdf:BadMatrixSigma', E.identifier)
+            % P matrix is not positive definite -> Remove iteration
+            nps = nps + 1; % Fails counter
+            % Error is 0 for failed iterations, nps is subtracted from the
+            % total number of iterations to calculate MSE.
+            % Continue with next iteration of the for loop without adding
+            % any error. This iteration won't affect the MSE.
+            continue;
+        elseif strcmp('Couldn''t find the nearest SPD', E.message)
+            disp(['Error found while Running MSE , iteration: ' num2str(r)]);
             % P matrix is not positive definite -> Remove iteration
             nps = nps + 1; % Fails counter
             % Error is 0 for failed iterations, nps is subtracted from the
@@ -502,12 +587,17 @@ for r=1:num_trials
 %         error = error + (y-y_analytic).^2;
     end
     % Update progress
-    try wbhandle = waitbar(r/num_trials, wbhandle); catch, delete(wbhandle); error('Manually stopped'); end
+    try wbhandle = waitbar(r/num_trials, wbhandle); catch, delete(wbhandle); error('MSE manually stopped by user.'); end
 end
 try delete(wbhandle); catch, error('Oops!');end
 % Calculate the mean squared error
 %
 num_trials = num_trials - nps; % Subtract failed iterations
+% Check how many nps were subptracted, i.e. failed runs of the MSE
+if num_trials <= 0
+    error('Not enough successful iterations when calculating MSE');
+end
+
 if ~REAL_DATA
 %     rmse = sqrt(error ./ num_trials) ./ relativator(x); % Divided by the range of the data to calculate the relative rmse
     rmse_ = sqrt(error_ ./ num_trials) ./ relativator(x);
@@ -523,12 +613,12 @@ if PCRB
     if ~REAL_DATA
         for i = 1:NAugmented
             subplot(2,4,i)
-            semilogy(rmse_(i,:),'.-'); hold on;
+            semilogy(t,rmse_(i,:),'.-'); hold on;
         %     semilogy(rmse(i,:),'x-');
 %             semilogy(rmse_(i,:),'.-');
         %     semilogy(mse__(i,:),'.-');
 %             semilogy(pcrb(i,:),'.-');
-            semilogy(pcrb_analytic(i,:),'.-');
+            semilogy(t,pcrb_analytic(i,:),'.-');
             grid on;
             xlabel('Time (s)');
             ylabel(['RMSE state ' num2str(i)]);
@@ -547,7 +637,7 @@ if PCRB
         end
         
         figure
-        semilogy(rmse_,'.-'); hold on;
+        semilogy(t,rmse_,'.-'); hold on;
 %         semilogy(rmse_,'.-');
         ylim([10^-6 10^6]);
         grid on;

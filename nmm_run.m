@@ -1,5 +1,4 @@
-% NMM_RUN Runs one iteration of the neural mass model (propagates mean
-% and covariance at time t)
+% NMM_RUN Runs one iteration of the neural mass model (propagates mean and covariance at time t)
 % 
 %   Inputs: 
 %       nmm - (struct) A predefined neural mass model.
@@ -34,6 +33,7 @@ if isfield(nmm.options, 'P6_montecarlo'), MONTECARLO = nmm.options.P6_montecarlo
 ALPHA_DECAY = false; 
 if isfield(nmm.options, 'ALPHA_DECAY'), ALPHA_DECAY = nmm.options.ALPHA_DECAY; end 
 
+
 % The parameters
 dt          = nmm.params.dt;
 e_0         = nmm.params.e0;
@@ -47,8 +47,8 @@ u           = nmm.params.u;         % mean input firing rate.
 
 % Implement exponential decay on alpha - params
 if ALPHA_DECAY
-    x(alpha_idx(1)) = x(alpha_idx(1)) * (0.99^(dt*decay_e/10)); % alpha_e; % Exponential decay implemented
-    x(alpha_idx(2)) = x(alpha_idx(2)) * (0.99^(dt*decay_e/10)); %alpha_i; % Exponential decay implemented
+    x(alpha_idx(1)) = x(alpha_idx(1)) * (0.99^(dt*decay_e/1)); % alpha_e; % Exponential decay implemented
+    x(alpha_idx(2)) = x(alpha_idx(2)) * (0.99^(dt*decay_e/1)); %alpha_i; % Exponential decay implemented
 end
 
 % The (augmented) states vector
@@ -187,74 +187,116 @@ switch mode
         Phi = ones(NStates,1)*q2'.*(AP*C_inhibit(z_idx,:)') + ones(NStates,1)*Xi'.*(AP*B(z_idx,:)');
                 
         %% Output:
-        % TODO: Check the 1's and 0's are correctly placed in Egxgx
-        analytic_cov = P1 + P3 + P6 + P4 + P5 + P7 + P8;
-%         analytic_cov = P1 + P3 + P6;% + P4 + P5 + P7 + P8;
-        analytic_cov(:,z_idx) = analytic_cov(:,z_idx) + Phi;
-        analytic_cov(z_idx,:) = analytic_cov(z_idx,:) + Phi';
+        % Uncomment next line for full polynomial as above.
+        % analytic_cov = P1 + P3 + P6 + P4 + P5 + P7 + P8; % Full polynomial
+        % Comment previous line and uncomment following three to calculate
+        % P4, P5, P7 and P8 as Phi + Phi'
+        analytic_cov = P1 + P3 + P6;% + P4 + P5 + P7 + P8; <- Note +P3
+        % analytic_cov = P1 - P3 + P6;% + P4 + P5 + P7 + P8; % Testing -P3 because I think the derivation might have a wrong sign. Update, sign seems to be correctly positive.
+        analytic_cov(:,z_idx) = analytic_cov(:,z_idx) + Phi; % This is P4 and P7
+        analytic_cov(z_idx,:) = analytic_cov(z_idx,:) + Phi'; % This is P5 and P8
+        
+        varargout{1} = analytic_mean; % E_t
+        varargout{2} = analytic_cov; % P_t
+    
+    case 'pip'
+        CPC = C(z_idx,:)*P*C(z_idx,:)';
+        dCPB = diag(C(z_idx,:)*P*B(z_idx,:)');
+        Bxi = B(z_idx,alpha_idx)*x(alpha_idx);
+        
+        gamma = 1./sqrt(2*(diag(CPC) + r^2));
+        beta = (C_inhibit(z_idx,[v_idx u_idx])*x([v_idx u_idx]) - v0).*gamma;       % <- v_0
+        Xi = (erf(beta) + 1)/2;
+        Upsilon = exp(-(beta.^2)).*gamma./sqrt(pi);
+        psi = Bxi.*Xi + dCPB.*Upsilon;                              % E[ Bxi_t o g(Cxi_t) ]
+        
+        %% Analytic mean
+        analytic_mean = A*x;
+        analytic_mean(2:2:2*NSynapses) = analytic_mean(2:2:2*NSynapses) + psi;
         
         %% Analytic Covariance (Pip)
         % cov part 1 (Phi)
+        q2 = Upsilon.*(Bxi - dCPB.*beta.*gamma.^2 *2);
+        AP = A*P;        
+        Phi = ones(NStates,1)*q2'.*(AP*C_inhibit(z_idx,:)') + ones(NStates,1)*Xi'.*(AP*B(z_idx,:)');
+%         
 %         q2 = Upsilon.*(Bxi - dCPB.*beta.*gamma.^2 *2);
 %         AP = A*P;
 %         
 %         Phi = ones(NStates,1)*q2'.*(AP*C(z_idx,:)') + ones(NStates,1)*Xi'.*(AP*B(z_idx,:)');
-% 
-%         % note: A term A*xi_t * E[ Bxi_t o g(Cxi_t) ]' = A*xi_0p*psi' is cancelled
-%         % from here from the full covariance expansion.
-% 
-%         % cov part 2 (Omega)
-%         %
-%         % NOTE: we can reduce the dimensionality (only compute upper triangle part) of the matrices we turn to vectors to increase speed in larger networks.
-%         %
-%         CPCgammagamma = asin(CPC.*(gamma*gamma')*2);
-%         CPCgammagamma = CPCgammagamma(:);                                           % change to a vector
-%         CPCgammagamma_y = CPCgammagamma*y_fast;                                     % a matrix of row vectors
-% 
-%         betabeta = (beta*beta')*2;
-%         betabeta_mat = betabeta(:)*ones(1,length(w_fast));                          % change to a vector and repmat
-% 
-%         beta2mat = (beta.^2)*ones(1,NSynapses);                                         % sq and repmat
-%         beta2matT = beta2mat';                                                      % the transpose allow for permutations when we sum below
-%         beta2_plus_beta2T = (beta2mat(:) + beta2matT(:))*ones(1,length(w_fast));    % change to a vectors, add, and repmat
-% 
-%         % put it together
-%         %
-%         Psi = reshape(sum(CPCgammagamma*w_fast.*exp(-(beta2_plus_beta2T - betabeta_mat.*sin(CPCgammagamma_y))./cos(CPCgammagamma_y).^2),2),NSynapses,NSynapses)/(4*pi);
-%         %                 ~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-%         %             ~~~
-%         Omega = ((Xi*Xi') + Psi).*(Bxi*Bxi' + P(alpha_idx,alpha_idx));
-%         %        ~~~~~~~~~~~~~~    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-%         %         E[g^2(Cxi)]           (alpha^2 + sigma_alpha^2)
-% 
-% 
-%         %%
-%         % here we construct the cov mat.
-%         %
-%         P_1m = AP*A';% + Q; % Q added outside this function
-%         P_1m(z_idx,z_idx) = P_1m(z_idx,z_idx)  + Omega - psi*psi';
-%         P_1m(:,z_idx) = P_1m(:,z_idx) + Phi;
-%         P_1m(z_idx,:) = P_1m(z_idx,:) + Phi';
-%         analytic_cov = P_1m;
-      
+
+        % note: A term A*xi_t * E[ Bxi_t o g(Cxi_t) ]' = A*xi_0p*psi' is cancelled
+        % from here from the full covariance expansion.
+
+        % cov part 2 (Omega)
+        %
+        % NOTE: we can reduce the dimensionality (only compute upper triangle part) of the matrices we turn to vectors to increase speed in larger networks.
+        %
+        CPCgammagamma = asin(CPC.*(gamma*gamma')*2);
+        CPCgammagamma = CPCgammagamma(:);                                           % change to a vector
+        CPCgammagamma_y = CPCgammagamma*y_fast;                                     % a matrix of row vectors
+
+        betabeta = (beta*beta')*2;
+        betabeta_mat = betabeta(:)*ones(1,length(w_fast));                          % change to a vector and repmat
+
+        beta2mat = (beta.^2)*ones(1,NSynapses);                                         % sq and repmat
+        beta2matT = beta2mat';                                                      % the transpose allow for permutations when we sum below
+        beta2_plus_beta2T = (beta2mat(:) + beta2matT(:))*ones(1,length(w_fast));    % change to a vectors, add, and repmat
+
+        % put it together
+        %
+        Psi = reshape(sum(CPCgammagamma*w_fast.*exp(-(beta2_plus_beta2T - betabeta_mat.*sin(CPCgammagamma_y))./cos(CPCgammagamma_y).^2),2),NSynapses,NSynapses)/(4*pi);
+        %                 ~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        %             ~~~
+        Omega = ((Xi*Xi') + Psi).*(Bxi*Bxi' + P(alpha_idx,alpha_idx));
+        %        ~~~~~~~~~~~~~~    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        %         E[g^2(Cxi)]           (alpha^2 + sigma_alpha^2)
+
+
+        %%
+        % here we construct the cov mat.
+        %
+        P_1m = AP*A';% + Q; % Q added outside this function
+        P_1m(z_idx,z_idx) = P_1m(z_idx,z_idx)  + Omega - psi*psi';
+        P_1m(:,z_idx) = P_1m(:,z_idx) + Phi;
+        P_1m(z_idx,:) = P_1m(z_idx,:) + Phi';
+        analytic_cov = P_1m;
+        
+        
         varargout{1} = analytic_mean; % E_t
         varargout{2} = analytic_cov; % P_t
-        
+
     case 'jacobian'        
         % Linearise g()
-        f_i_derivative = 2*e_0*r*f_i*(1-f_i);      % inhibitory feedback firing
-        f_e_derivative = 2*e_0*r*f_e*(1-f_e);      % excitatory feedback firing
+%         f_i_derivative = 2*e_0*r*f_i*(1-f_i);      % inhibitory feedback firing
+%         f_e_derivative = 2*e_0*r*f_e*(1-f_e);      % excitatory feedback firing
+%         
+%         G = [   0,              0,              0,              0,	0,  0,  0; ...
+%                 0,              0,     -a_ie*f_i_derivative,    0,	0,  0,  0; ...
+%                 0,              0,              0,              0,	0,  0,  0; ...
+%         a_ei*f_e_derivative,    0,              0,              0,	0,  0,  0; ...
+%                 0,              0,              0,              0,  0,  0,  0; ...
+%                 0,              0,              0,              0,  0,  0,  0; ...
+%                 0,              0,              0,              0,  0,  0,  0];
+%         
+%         % Jacobian
+%         varargout{1} = A + G;
+
+        % Derivatives of non linear function:
+        df_e = r*f_e*(1-f_e); %0.5/(r*sqrt(2));
+        df_i = r*f_i*(1-f_i); % 0.5/(r*sqrt(2));
         
-        G = [   0,              0,              0,              0,	0,  0,  0; ...
-                0,              0,     -a_ie*f_i_derivative,    0,	0,  0,  0; ...
-                0,              0,              0,              0,	0,  0,  0; ...
-        a_ei*f_e_derivative,    0,              0,              0,	0,  0,  0; ...
-                0,              0,              0,              0,  0,  0,  0; ...
-                0,              0,              0,              0,  0,  0,  0; ...
-                0,              0,              0,              0,  0,  0,  0];
+        % Jacobian Matrix
+        J = [   1,             dt,              0,              0,          0,          0,      0; ...
+         -decay_e^2*dt,   1-2*decay_e*dt,   -x(6)*df_e,      	0,      x(6)*df_e,     f_e      0; ...
+                0,              0,              1,             dt,          0,          0,      0; ...
+            x(7)*df_i,          0       -decay_i^2*dt,   1-2*decay_i*dt,    0,          0,     f_i; ...
+                0,              0,              0,              0,          1,          0,      0; ...
+                0,              0,              0,              0,          0,          1,      0; ...
+                0,              0,              0,              0,          0,          0,      1];
         
-        % Jacobian
-        varargout{1} = A + G;
+        varargout{1} = J;
+            
 end % End switch
 
 % Optional outputs
@@ -320,21 +362,22 @@ function expectation = E_gx_gx(x, P, u, v0, r, montecarlo, varargin)
         % States (membrane potentials)
         v_e = x(1); % Excitatory
         v_i = x(3); % Inhibitory
-        
-        
+                
         % Solve analytically
         % analytic expectation
         % Bivariate: Multivariate Gaussian cdf neads z to be nXd where n is the number of observations and d is the size of the states (states 'x' is a column vector, in z the states are a row vector)
-        z_ = (v0 + r.*randn(1, 2))'; % 2 new independent random variables z1 and z2. Normal distribution with mean v0 and variance r. % z_ = mvnrnd(v0, r, N_states);
-        z = non_linear_sigmoid(z_, r, v0, [sigma_sq_e sigma_sq_i]);
-        mu_hat = [v0 - v_e; v0 - v_i];
-
+        %z_ = (v0 + r.*randn(1, 2))'; % 2 new independent random variables z1 and z2. Normal distribution with mean v0 and variance r. % z_ = mvnrnd(v0, r, N_states);
+        %z = non_linear_sigmoid(z_, r, v0, [sigma_sq_e sigma_sq_i]);
+        mu_hat = [v0 - (x(5) - v_i); v0 - v_e];
+        
         sigma_hat = [r^2 + sigma_sq_e, cov_e_i; ...
                      cov_i_e    , r^2 + sigma_sq_i];%     sigma_hat = r^2 * eye(N_states) + cov(x(:,1), x(:,2));
-
-        E_gx_gx = mvncdf(z', mu_hat', sigma_hat); % Multivariate Gaussian cumulative distribution with mean mu_hat and variance sigma_hat
         
-        expectation = E_gx_gx .* ([x(1);x(3)] * [x(1);x(3)]'); % Analytic expectation
+        % E_gx_gx = mvncdf(z', mu_hat', sigma_hat); % Multivariate Gaussian cumulative distribution with mean mu_hat and variance sigma_hat
+        E_gx = mvncdf([0 0; 0 0], mu_hat', sigma_hat); % Multivariate Gaussian cumulative distribution with mean mu_hat and variance sigma_hat. This corresponds to 1 Phi function
+        E_gx_gx = E_gx;% * E_gx'; % This corresponds to Phi*Phi'
+    
+        expectation = E_gx_gx .* ([x(6);x(7)] * [x(6);x(7)]'); % Analytic expectation
     end
 end
 
