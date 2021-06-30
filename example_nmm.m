@@ -15,7 +15,7 @@ NAugmented = NStates + NInputs + NParams; % Total size of augmented state vector
 
 ESTIMATE        = true;         % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
 PCRB            = 0;            % Compute the PCRB (false = 0, or true > 0) The number here defines the iterations for CRB and MSE
-REAL_DATA       = true;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
+REAL_DATA       = false;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
 TRUNCATE        = 10000;            % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'
 SCALE_DATA      = 6/50;         % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
 INTERPOLATE     = 0;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
@@ -270,7 +270,7 @@ else
     t = t_;
 end
 
-%% Run EKF for this model
+%% Run KF for this model
 % Prior distribution (defined by m0 & P0)
 m0 = params.v0*ones(size(x0));% m0([2 4]) = 0; mean(x(:,ceil(size(x,2)/2):end),2); %
 m0(5) = 0;% mean(y(ceil(size(y,2)/2):end)); % x0(5);%32;%
@@ -282,7 +282,7 @@ nmm.x0 = m0; % Update initial value in nmm, i.e. nmm.x0
 % forward model
 % P0(NAugmented - NParams + 1 : end, NAugmented - NParams + 1 : end) = 1e3*eye(NParams);
 
-% Apply EKF filter
+% Apply KF filter chosen in options at the top
 try
     tic
     [m, Phat, ~, fi_exp, fe_exp] = analytic_kalman_filter_2(y,f_,nmm,H,Q,R,'euler');

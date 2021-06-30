@@ -19,8 +19,8 @@ switch mode
         params.v0 = 6; % Firing Threshold
 
         % inverse time constants
-        params.decay_e = 100;% (1/ tau_e)
-        params.decay_i = 50; % (1/tau_i)
+        params.decay_e = 50; % 100;% (1/ tau_e)
+        params.decay_i = 100; % 50; % (1/tau_i)
         
         params.alpha_ei = 3.25;% 3.25;     % Gains (a_ei = excitatory), lumped parameter will look like: % alpha_i = 162500
         params.alpha_ie = 22;%6.25;%6.25;%22;%12.5;  % (a_ie = inhibitory), % alpha_e = 440000
