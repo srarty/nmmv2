@@ -111,8 +111,10 @@ switch mode
         
         % Nonlinear component of expectation
         % E[g(x)] is E_gx, or E[phi(E)]
+        % E_gx = B*x .* phi_c; % non_linear_sigmoid(C*x,r,v0)
         E_gx = phi_c; % non_linear_sigmoid(C*x,r,v0)
-        
+        % E_gx = non_linear_sigmoid(C*x,r,v0);
+                
         CPC = C(z_idx,:)*P*C(z_idx,:)';
         dCPB = diag(C(z_idx,:)*P*B(z_idx,:)');
         Bxi = B(z_idx,alpha_idx)*x(alpha_idx);
@@ -135,10 +137,11 @@ switch mode
         P1 = A*P*A'; % P2 = Q; % Q is added in analytic_kalman_filter_2 after calling nmm function
         
         %% P3 = -E[phi(E)]E[phi(E)'], this is, E[E_phi(E)] = E_gx 
-%         P3_ = -E_gx*E_gx';
-%         P3 = zeros(NStates);
-%         P3(z_idx,z_idx) = P3_;
-        P3 = -E_gx*E_gx';
+        % P3 = -E_gx*E_gx';
+        P3_ = -E_gx*E_gx';
+        P3 = zeros(NStates);
+        %P3(z_idx,z_idx) = P3_;
+        P3 = P3_.*B*x;
         
         %% P4 = -A*E_hat*E[phi(E)'] 
         P4_ = -x(z_idx) * E_gx(z_idx)'; % -A*x*E_gx';
@@ -153,8 +156,12 @@ switch mode
         %% P6 = E[phi(E)phi(E)'] 
         P6_ =  E_gx_gx(x, P, u, v0, r, MONTECARLO); % All the values of P (for all the states) % Do I need the dt? % This is E_gx_gx or E[g(x)g(x)] equation 25 to 30 SKF_Derivation_Prob
         P6 = zeros(NStates);
-        P6(z_idx,z_idx) = diag(diag(P6_));
-                
+        P6(z_idx,z_idx) = P6_;% diag(diag(P6_));
+        % Now perform the Hadamard product with (Xi)(Xi') as in the
+        % derivation document.
+%         Bx = B*x;
+%         Bx = Bx * Bx';
+%         P6 = P6 .* Bx;
         
         %% P7 and P8 
         % Question: Do this term need to be multiplied by dt?         
@@ -191,8 +198,7 @@ switch mode
         % analytic_cov = P1 + P3 + P6 + P4 + P5 + P7 + P8; % Full polynomial
         % Comment previous line and uncomment following three to calculate
         % P4, P5, P7 and P8 as Phi + Phi'
-        analytic_cov = P1 + P3 + P6;% + P4 + P5 + P7 + P8; <- Note +P3
-        % analytic_cov = P1 - P3 + P6;% + P4 + P5 + P7 + P8; % Testing -P3 because I think the derivation might have a wrong sign. Update, sign seems to be correctly positive.
+        analytic_cov = P1 + P3 + P6;% + P4 + P5 + P7 + P8;
         analytic_cov(:,z_idx) = analytic_cov(:,z_idx) + Phi; % This is P4 and P7
         analytic_cov(z_idx,:) = analytic_cov(z_idx,:) + Phi'; % This is P5 and P8
         
@@ -375,7 +381,7 @@ function expectation = E_gx_gx(x, P, u, v0, r, montecarlo, varargin)
         
         % E_gx_gx = mvncdf(z', mu_hat', sigma_hat); % Multivariate Gaussian cumulative distribution with mean mu_hat and variance sigma_hat
         E_gx = mvncdf([0 0; 0 0], mu_hat', sigma_hat); % Multivariate Gaussian cumulative distribution with mean mu_hat and variance sigma_hat. This corresponds to 1 Phi function
-        E_gx_gx = E_gx;% * E_gx'; % This corresponds to Phi*Phi'
+        E_gx_gx = E_gx; % This corresponds to Phi*Phi'
     
         expectation = E_gx_gx .* ([x(6);x(7)] * [x(6);x(7)]'); % Analytic expectation
     end
@@ -387,7 +393,7 @@ function expectation = E_xi_gxj(x_i,x_j, v0, s_jj, s_ij, r)
 % 29 from SKF_Derivation_Algebraic:
 % E[f(x)] = (x_i/2)*erf((x_j-v0)/sqrt(2(s_jj + r^2))) + x_i/2 + s_ij/sqrt(2*pi*(s_jj + r^2))*exp(-(x_j-v0)^2/(2*(s_jj+r^2)))
 
-expectation = (x_i/2)*erf((x_j-v0)/sqrt(2*(s_jj + r^2))) + x_i/2 +...
+ expectation = (x_i/2)*erf((x_j-v0)/sqrt(2*(s_jj + r^2))) + x_i/2 +...
     s_ij/sqrt(2*pi*(s_jj + r^2))*exp(-(x_j-v0)^2/(2*(s_jj+r^2)));
 
 end

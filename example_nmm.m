@@ -24,7 +24,7 @@ REMOVE_DC       = false;        % Remove DC offset from simulated observed EEG
 ADD_NOISE       = true;         % Add noise to the forward model's states
 ADD_OBSERVATION_NOISE = true;	% Add noise to the forward model's states
 
-KF_TYPE         = 'unscented';  % String: 'unscented', 'extended' (default) or 'none'
+KF_TYPE         = 'extended';  % String: 'unscented', 'extended' (default) or 'none'
 ANALYTIC_TYPE   = 'analytic';   % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
 
 ALPHA_KF_LBOUND  = false;       % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
