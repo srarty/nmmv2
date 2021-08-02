@@ -14,9 +14,11 @@ NParams = 2; % Number of synaptic strength parameters (alpha_ie, alpha_ei, etc..
 NAugmented = NStates + NInputs + NParams; % Total size of augmented state vector
 
 ESTIMATE        = true;         % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
-PCRB            = 0;            % Compute the PCRB (false = 0, or true > 0) The number here defines the iterations for CRB and MSE
-REAL_DATA       = false;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
-TRUNCATE        = 10000;            % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'
+PCRB            = 0;            % Compute the PCRB (false = 0, or true > 0) The number here defines the iterations for CRB
+MSE             = 0;            % Compute the MSE (false = 0, or true > 0) The number here defines the iterations for MSE
+REAL_DATA       = true;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
+LFP_SIMULATION  = true;         % True if data is ground truth data from the Brunel model
+TRUNCATE        = -9800;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'
 SCALE_DATA      = 6/50;         % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
 INTERPOLATE     = 0;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
 
@@ -24,7 +26,7 @@ REMOVE_DC       = false;        % Remove DC offset from simulated observed EEG
 ADD_NOISE       = true;         % Add noise to the forward model's states
 ADD_OBSERVATION_NOISE = true;	% Add noise to the forward model's states
 
-KF_TYPE         = 'extended';  % String: 'unscented', 'extended' (default) or 'none'
+KF_TYPE         = 'unscented';  % String: 'unscented', 'extended' (default) or 'none'
 ANALYTIC_TYPE   = 'analytic';   % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
 
 ALPHA_KF_LBOUND  = false;       % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
@@ -34,8 +36,14 @@ FIX_PARAMS      = false;         % Fix input and alpha parameters to initial con
 RANDOM_ALPHA    = true;         % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
 MONTECARLO      = false;        % Calculatruee term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
 
+PLOT            = true;        % Ture to plot the result of the forward model and fitting.
+
 relativator = @(x)sqrt(mean(x.^2,2)); % @(x)(max(x')-min(x'))'; % If this is different to @(x)1, it calculates the relative RMSE dividing by whatever this value is.
 % ----------------------------------------------------------------------- %
+
+% Location of the data
+% data_file = './data/Seizure_1.mat';
+data_file = 'C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/lfp.mat';
 
 % Initialise random number generator for repeatability
 rng(0);
@@ -44,7 +52,7 @@ rng(0);
 % params = set_parameters('alpha', mu); % Set params.u from the input argument 'mu' of set_params
 params = set_parameters('alpha');       % Chose params.u from a constant value in set_params
 
-N = 2000; % 148262; % Seizure 1 size: 148262;             	% number of samples
+N = 2000; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
 if (TRUNCATE && REAL_DATA), N = TRUNCATE; end % If TRUNCATE ~=0, only take N = TRUNCATE samples of the recording or simulation
 dT = params.dt;         % sampling time step (global)
 dt = 1*dT;            	% integration time step
@@ -126,8 +134,8 @@ end
 
 % Calculate noise covariance based on trajectory variance over time??
 %   Why noise on all states?
-Q = 1e-3*eye(NAugmented);
-% Q = 10^-3.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
+% Q = 1e-3*eye(NAugmented);
+ Q = 10^-3.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
 % Q(NStates+1 : end, NStates+1 : end) =  10e-3*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
 
 v = 10e-1.*mvnrnd(zeros(NAugmented,1),Q,N)';
@@ -166,7 +174,7 @@ H = H/nmm.params.scale;
 
 R = 1e-1*eye(1);
 
-w = ADD_OBSERVATION_NOISE .* mvnrnd(zeros(size(H,1),1),R,N)';
+w = ADD_OBSERVATION_NOISE .* mvnrnd(zeros(size(H,1),1),R,abs(N))'; % Absolute value of N accounts for when TRUNCATE is negative (truncating the initial part of the recording)
 y = H*x + w;
 
 if REMOVE_DC
@@ -226,23 +234,51 @@ end
     
 if REAL_DATA
     % Load real data from .mat :
-    load('./data/Seizure_1.mat');  % change this path to load alternative data
-    Ch = 1; % Channel
-    y = Seizure(:,Ch)';
+    load(data_file);  % change this path to load alternative data
+    if ~LFP_SIMULATION
+        % Real iEEG recordings (neurovista)
+        Ch = 1; % Channel
+        y = Seizure(:,Ch)';
+    else
+        % Ground truth
+        y = Seizure; % Load the data
+        y = reshape(y,1,length(y));% Ensure it's horizontal
+        x = zeros([size(x,1) size(Seizure,2)]); 
+        x(1,:) = (V_py - v_rest) * 1e3; % Substract the resting membrane potential from the Brunel and scale to remove mV
+        x(2,:) = [0 diff(x(1,:))/lfp_dt];
+        x(3,:) = (V_in - v_rest) * 1e3;
+        x(4,:) = [0 diff(x(3,:))/lfp_dt];
+        x(5,:) = u;
+    end
+        
+    if REMOVE_DC
+        % Remove DC offset from real or ground truth data
+        y = y - mean(y(length(y)/2:end));
+    end
     
     % Check if the data contains a time stamp
     if ~exist('T', 'var')
-        T = 4.0694e6; % Hardcoded data taken from Seizure_1.mat
+        if ~LFP_SIMULATION
+            T = 4.0694e6; % Hardcoded data taken from Seizure_1.mat
+        else
+            T = lfp_dt * length(y);
+        end
     end
     % Define the time step
-    params.dt = 1e-3*T/length(y);
+    params.dt = 1e-3*T/length(y); % 1e-3 because we want miliseonds
         
     if TRUNCATE > 0
         % Truncate from the beginning
         y = y(1:N);
+        if LFP_SIMULATION
+            x = x(:,1:N);
+        end
     elseif TRUNCATE < 0
         % Truncate from end
         y = y(end+N+1 : end);
+        if LFP_SIMULATION
+            x = x(:,end+N+1 : end);
+        end
     end
     
     if SCALE_DATA %#ok<BDLGI> % Removes the warning for SCALE_DATA being constant
@@ -256,7 +292,7 @@ if INTERPOLATE
     t_ = params.dt:params.dt:params.dt*length(y_); % Store original time series
     t = (params.dt:params.dt:params.dt*length(y))./INTERPOLATE; % Upsampled time series
     params.dt = params.dt/INTERPOLATE;
-    if ~REAL_DATA
+    if (~REAL_DATA || LFP_SIMULATION)
         % If not real data, i.e. simulated data, then interpolate the x as
         % well
         x_ = x; % Store original state vector
@@ -301,199 +337,205 @@ end
 y_analytic = H*m;% + w;
 
 %% Plot results
-if ~REAL_DATA
-    %% Plot x(1) and ECoG
-    figure
-    ax1=subplot(211);
-    plot(t,x(1,:)'); hold on;
-    plot(t,m(1,:)','--'); % EKF
-%     plot(t,m_(1,:)','--'); % Analytic, rung kuta
-    % plot(t,m__([1],:)','--'); % Analytic euler
-    legend({'Actual','Estimation'});
-    ylabel('State 1');
-    ax2=subplot(212);
-    plot(t,y); hold on;
-%     plot(t,y_ekf, '--');
-    plot(t,y_analytic, '--');
-    legend({'Observed EEG', 'Estimated EEG (Analytic)'});
-    % plot(t,pcrb(1,:)')
-    % legend({'CRLB'})
-    ylabel('ECoG (mV)');
-    xlabel('Time (s)');
-    linkaxes([ax1 ax2],'x');
+if PLOT
+    if (~REAL_DATA || LFP_SIMULATION)
+        %% Plot x(1) and ECoG
+        figure
+        ax1=subplot(211);
+        plot(t,x(1,:)'); hold on;
+        plot(t,m(1,:)','--'); % EKF
+    %     plot(t,m_(1,:)','--'); % Analytic, rung kuta
+        % plot(t,m__([1],:)','--'); % Analytic euler
+        legend({'Actual','Estimation'});
+        ylabel('State 1');
+        ax2=subplot(212);
+        plot(t,y); hold on;
+    %     plot(t,y_ekf, '--');
+        plot(t,y_analytic, '--');
+        legend({'Observed EEG', 'Estimated EEG (Analytic)'});
+        % plot(t,pcrb(1,:)')
+        % legend({'CRLB'})
+        ylabel('ECoG (mV)');
+        xlabel('Time (s)');
+        linkaxes([ax1 ax2],'x');
 
-    %% Plot all 4 states
-    figure
-    axs = nan(NStates,1); % Axes handles to link subplots x-axis
-    for i = 1:NStates
-        axs(i) = subplot(NStates, 1, i);
-        plot(t_(1:min(length(t_),size(x,2))),x(i,1:min(length(t_),size(x,2)))'); hold on;
-        plot(t,m(i,:)','--');
-%         plot(t,m_(i,:)','--');
-    %     plot(t,m__(i,:)','--');
-        ylabel(['State ' num2str(i)]);
-    end
-    linkaxes(axs, 'x');
-    legend({'Simulation', 'Estimation'});
-    xlabel('time');
-    
-    %% Plot external input and augmented parameters
-    figure
-    axs = nan(NAugmented - NStates,1); % Axes handles to link subplots x-axis
-    for i = 1:NAugmented - NStates
-        axs(i) = subplot(NAugmented - NStates, 1, i);
-        plot(t_(1:min(length(t_),size(x,2))),x(NStates + i,1:min(length(t_),size(x,2)))'); hold on;
-        plot(t,m(NStates + i,:)','--');
-        % plot(t,m_(i,:)','--');
-        % plot(t,m__(i,:)','--');
-        plot(t, zeros(size(t)), '--', 'Color', [0.8 0.8 0.8]);
-        ylabel(['Parameter ' num2str(i)]);
-    end
-    linkaxes(axs, 'x');
-    xlabel('time');
-    legend({'Simulation', 'Estimation'});
-    
-    %% Firing rates (Output of the nonlinearity)
-    figure
-    ax1 = subplot(2,1,1);
-    plot(t_, f_e);
-    hold
-    plot(t, fe_exp, '--');
-    title('Sigmoid function output');
-    ylabel('f_e');
-    ax2 = subplot(2,1,2);
-    plot(t_, f_i);
-    hold
-    plot(t,fi_exp, '--');
-    ylabel('f_i');
-    linkaxes([ax1 ax2],'x');
-    xlabel('Time (s)');
-        
-    %% Covariance (Estimation)
-    figure
-    % plt = @(x,varargin)plot(t,squeeze(x)./max(abs(squeeze(x))),varargin{1});
-    plt = @(x,varargin)plot(t,squeeze(x),varargin{1}); % Estimation
-    plt_ = @(x,varargin)plot(t_,squeeze(x),varargin{1}); % Forward (time vector is different)
-    for i = 1:NAugmented
-        subplot(2,4,i)
-        % Forward model
-        plt_(P(i,i,:),'-'); hold on;
-        % Estimation
-        plt(Phat(i,i,:),'--');hold on;
-%         plt(Phat_(i,i,:),'--');
-    end
-    legend({'Simulation', 'Analytic KF'});
-    subplot(2,4,1);
-    title('Covariance matrix (P) - Diagonal');
-    
-    %% Covariance of alpha vectors
-    figure
-    for i = 1:NAugmented
-        for j = 1:NAugmented
-            subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
-            % Estimation
-            plt(Phat(j,i,:),''); hold on;
-            xlim([0.2 5]);
-%             ylim([-100000 100000]);
+        %% Plot all 4 states
+        figure
+        axs = nan(NStates,1); % Axes handles to link subplots x-axis
+        for i = 1:NStates
+            axs(i) = subplot(NStates, 1, i);
+            plot(t_(1:min(length(t_),size(x,2))),x(i,1:min(length(t_),size(x,2)))'); hold on;
+            plot(t,m(i,:)','--');
+    %         plot(t,m_(i,:)','--');
+        %     plot(t,m__(i,:)','--');
+            ylabel(['State ' num2str(i)]);
         end
-    end
-    
-else
-    % If estimating real data
-    figure
-    ax1=subplot(211);
-    plot(t,m([1],:)','-'); hold on; % Analytic KF
-    legend({'Prediction'});
-    ylabel('State 1 (Vm)');
-    
-    ax2=subplot(212);
-    plot(t,y_analytic, '--', 'LineWidth', 2);hold on
-    plot(t,y);
-    linkaxes([ax1 ax2],'x');
-    ylabel('ECoG');
-    xlabel('Time (s)');
-    % Here, find and plot places where alpha's cross through zero
-    zci = @(v) find(diff(sign(v))); % Zero cross detector
-    try plot(t(zci(m(6,:))), max(y) + 1,'v', 'Color', [0.4 0.6 0.9], 'MarkerSize', 8, 'LineWidth', 2); catch, end
-    try plot(t(zci(m(7,:))), max(y) + 1,'v', 'Color', [0.8 0.4 0.1], 'MarkerSize', 8, 'LineWidth', 2); catch, end
-    % Rapid change in alpha
-    hdi = @(v) find(diff(abs(v)) > 30 * (mean(abs(diff(v))) + std(abs(diff(v)))) ~= 0);
-    try plot(t(hdi(m(6,:))), -(max(y) + 1),'^', 'Color', [0.4 0.6 0.9], 'MarkerSize', 8, 'LineWidth', 2); catch, end
-    try plot(t(hdi(m(7,:))), -(max(y) + 1),'^', 'Color', [0.8 0.4 0.1], 'MarkerSize', 8, 'LineWidth', 2); catch, end
-    
-    legend('Prediction','Observed ECoG'); % legend('EKF', 'Analytic (euler)','Observed EEG');
-    
-    % Plot the 4 states
-    figure
-    axs = nan(NStates,1); % Axes handles to link subplots x-axis
-    for i = 1:NStates
-        axs(i) = subplot(NStates, 1, i);
-        plot(t,m(i,:)','-');hold on;
-        ylabel(['State ' num2str(i)]);
-    end
-    linkaxes(axs, 'x');
-    xlabel('Time (s)');
+        linkaxes(axs, 'x');
+        legend({'Simulation', 'Estimation'});
+        xlabel('time');
 
-    % Plot the 3 parameters
-    figure
-    axs = nan(NAugmented-NStates,1); % Axes handles to link subplots x-axis
-    for i = NStates+1:NAugmented
-        axs(i-NStates) = subplot(NAugmented-NStates, 1, i-NStates);
-        plot(t,m(i,:)','-');hold on;
-        plot(t, zeros(size(t)), '--', 'Color', [0.8 0.8 0.8]);
-        ylabel(['Parameter ' num2str(i-NStates)]);
-    end
-    linkaxes(axs, 'x');
-    xlabel('Time (s)');
-    
-    % Firing rates (Output of the nonlinearity)
-    figure
-    ax1 = subplot(2,1,1);
-    plot(t, fe_exp, '-');
-    title('Sigmoid function output (prediction)');
-    ylabel('f_e');
-    ax2 = subplot(2,1,2);
-    plot(t,fi_exp, '-');
-    ylabel('f_i');
-    linkaxes([ax1 ax2],'x');
-    xlabel('Time (s)');
-    
-    % Covariance (Estimation)
-    figure
-    % plt = @(x,varargin)plot(t,squeeze(x)./max(abs(squeeze(x))),varargin{1});
-    plt = @(x,varargin)plot(t,squeeze(x),varargin{1});
-    plt_ = @(x,varargin)plot(t,squeeze(x),varargin{1});
-    for i = 1:NAugmented
-        subplot(2,4,i)
-        % Estimation
-        plt(Phat(i,i,:),''); hold on;
-        % Forward model
-%         plt_(Phat_(i,i,:),'--');
-    end
-%     legend({'EKF' 'Analytic'});
-    legend({'Analytic'});
-    subplot(2,4,1);title('Covariance matrix (P) - Diagonal'); 
-    
-    % Covariance of alpha vectors
-    figure
-    for i = 1:NAugmented
-        for j = 1:NAugmented
-            subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
-            % Estimation
-            plt(Phat(j,i,:),''); hold on;
+        %% Plot external input and augmented parameters
+        figure
+        axs = nan(NAugmented - NStates,1); % Axes handles to link subplots x-axis
+        for i = 1:NAugmented - NStates
+            axs(i) = subplot(NAugmented - NStates, 1, i);
+            plot(t_(1:min(length(t_),size(x,2))),x(NStates + i,1:min(length(t_),size(x,2)))'); hold on;
+            plot(t,m(NStates + i,:)','--');
+            % plot(t,m_(i,:)','--');
+            % plot(t,m__(i,:)','--');
+            plot(t, zeros(size(t)), '--', 'Color', [0.8 0.8 0.8]);
+            ylabel(['Parameter ' num2str(i)]);
         end
-    end
-end
+        linkaxes(axs, 'x');
+        xlabel('time');
+        legend({'Simulation', 'Estimation'});
 
-% Nice placement of figures
-poss = [104, 562, 560, 420; 694, 563, 560, 420; 1288, 562, 560, 420; 107,  49, 560, 420; 693,  51, 560, 420; 1287,  50, 560, 420];
-for i = 1:6, figs{i}=figure(i); end
-for i = 1:6, figs{i}.Position = poss(i,:); end
+        %% Firing rates (Output of the nonlinearity)
+        figure
+        ax1 = subplot(2,1,1);
+        if ~LFP_SIMULATION
+            plot(t_, f_e);        
+            hold
+        end
+        plot(t, fe_exp, '--');
+        title('Sigmoid function output');
+        ylabel('f_e');
+        ax2 = subplot(2,1,2);
+        if ~LFP_SIMULATION
+            plot(t_, f_i);
+            hold
+        end
+        plot(t,fi_exp, '--');
+        ylabel('f_i');
+        linkaxes([ax1 ax2],'x');
+        xlabel('Time (s)');
+
+        %% Covariance (Estimation)
+        figure
+        % plt = @(x,varargin)plot(t,squeeze(x)./max(abs(squeeze(x))),varargin{1});
+        plt = @(x,varargin)plot(t,squeeze(x),varargin{1}); % Estimation
+        plt_ = @(x,varargin)plot(t_,squeeze(x),varargin{1}); % Forward (time vector is different)
+        for i = 1:NAugmented
+            subplot(2,4,i)
+            % Forward model
+            plt_(P(i,i,:),'-'); hold on;
+            % Estimation
+            plt(Phat(i,i,:),'--');hold on;
+    %         plt(Phat_(i,i,:),'--');
+        end
+        legend({'Simulation', 'Analytic KF'});
+        subplot(2,4,1);
+        title('Covariance matrix (P) - Diagonal');
+
+        %% Covariance of alpha vectors
+        figure
+        for i = 1:NAugmented
+            for j = 1:NAugmented
+                subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
+                % Estimation
+                plt(Phat(j,i,:),''); hold on;
+                xlim([0.2 5]);
+    %             ylim([-100000 100000]);
+            end
+        end
+
+    else
+        %%
+        % If estimating real data
+        figure
+        ax1=subplot(211);
+        plot(t,m([1],:)','-'); hold on; % Analytic KF
+        legend({'Prediction'});
+        ylabel('State 1 (Vm)');
+
+        ax2=subplot(212);
+        plot(t,y_analytic, '--', 'LineWidth', 2);hold on
+        plot(t,y);
+        linkaxes([ax1 ax2],'x');
+        ylabel('ECoG');
+        xlabel('Time (s)');
+        % Here, find and plot places where alpha's cross through zero
+        zci = @(v) find(diff(sign(v))); % Zero cross detector
+        try plot(t(zci(m(6,:))), max(y) + 1,'v', 'Color', [0.4 0.6 0.9], 'MarkerSize', 8, 'LineWidth', 2); catch, end
+        try plot(t(zci(m(7,:))), max(y) + 1,'v', 'Color', [0.8 0.4 0.1], 'MarkerSize', 8, 'LineWidth', 2); catch, end
+        % Rapid change in alpha
+        hdi = @(v) find(diff(abs(v)) > 30 * (mean(abs(diff(v))) + std(abs(diff(v)))) ~= 0);
+        try plot(t(hdi(m(6,:))), -(max(y) + 1),'^', 'Color', [0.4 0.6 0.9], 'MarkerSize', 8, 'LineWidth', 2); catch, end
+        try plot(t(hdi(m(7,:))), -(max(y) + 1),'^', 'Color', [0.8 0.4 0.1], 'MarkerSize', 8, 'LineWidth', 2); catch, end
+
+        legend('Prediction','Observed ECoG'); % legend('EKF', 'Analytic (euler)','Observed EEG');
+
+        % Plot the 4 states
+        figure
+        axs = nan(NStates,1); % Axes handles to link subplots x-axis
+        for i = 1:NStates
+            axs(i) = subplot(NStates, 1, i);
+            plot(t,m(i,:)','-');hold on;
+            ylabel(['State ' num2str(i)]);
+        end
+        linkaxes(axs, 'x');
+        xlabel('Time (s)');
+
+        % Plot the 3 parameters
+        figure
+        axs = nan(NAugmented-NStates,1); % Axes handles to link subplots x-axis
+        for i = NStates+1:NAugmented
+            axs(i-NStates) = subplot(NAugmented-NStates, 1, i-NStates);
+            plot(t,m(i,:)','-');hold on;
+            plot(t, zeros(size(t)), '--', 'Color', [0.8 0.8 0.8]);
+            ylabel(['Parameter ' num2str(i-NStates)]);
+        end
+        linkaxes(axs, 'x');
+        xlabel('Time (s)');
+
+        % Firing rates (Output of the nonlinearity)
+        figure
+        ax1 = subplot(2,1,1);
+        plot(t, fe_exp, '-');
+        title('Sigmoid function output (prediction)');
+        ylabel('f_e');
+        ax2 = subplot(2,1,2);
+        plot(t,fi_exp, '-');
+        ylabel('f_i');
+        linkaxes([ax1 ax2],'x');
+        xlabel('Time (s)');
+
+        % Covariance (Estimation)
+        figure
+        % plt = @(x,varargin)plot(t,squeeze(x)./max(abs(squeeze(x))),varargin{1});
+        plt = @(x,varargin)plot(t,squeeze(x),varargin{1});
+        plt_ = @(x,varargin)plot(t,squeeze(x),varargin{1});
+        for i = 1:NAugmented
+            subplot(2,4,i)
+            % Estimation
+            plt(Phat(i,i,:),''); hold on;
+            % Forward model
+    %         plt_(Phat_(i,i,:),'--');
+        end
+    %     legend({'EKF' 'Analytic'});
+        legend({'Analytic'});
+        subplot(2,4,1);title('Covariance matrix (P) - Diagonal'); 
+
+        % Covariance of alpha vectors
+%         figure
+%         for i = 1:NAugmented
+%             for j = 1:NAugmented
+%                 subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
+%                 % Estimation
+%                 plt(Phat(j,i,:),''); hold on;
+%             end
+%         end
+    end
+    % Nice placement of figures
+    poss = [104, 562, 560, 420; 694, 563, 560, 420; 1288, 562, 560, 420; 107,  49, 560, 420; 693,  51, 560, 420; 1287,  50, 560, 420];
+    for i = 1:6, figs{i}=figure(i); end
+    for i = 1:6, figs{i}.Position = poss(i,:); end
+end % If PLOT
 
 %% Compute the posterior Cramer-Rao bound (PCRB)
-if ~PCRB
+if ~PCRB && ~MSE
     return
-else
+elseif PCRB
     M = PCRB;    % Number of Monte Carlo samples % PCRB contains the number of iterations on the Cramer-Rao bound's calculation and the MSE
     
     try
@@ -513,7 +555,7 @@ else
 end
 
 %% Compute the MSE of the extended Kalman filter
-num_trials = PCRB; % PCRB contains the number of iterations on the Cramer-Rao bound's calculation and the MSE
+num_trials = MSE; % PCRB contains the number of iterations on the Cramer-Rao bound's calculation and the MSE
 if ~REAL_DATA
     err = zeros(NAugmented,N * max(1,INTERPOLATE));
     error_ = zeros(NAugmented,N * max(1,INTERPOLATE));
@@ -524,7 +566,7 @@ else
 end
 nps = 0; % Non-positive semidefinite P matrix, iteration counter for removal
 % parfor r=1:num_trials
-% To avoid calculating the new trajectory every iteration. Comparing to the "real" x value generated above
+% To avoid calculating the new trajectory every iteration. Comparing to the "real" value generated above
 z = y; 
 % Progress bar
 wbhandle = waitbar(0, 'Calculating MSE...');
@@ -590,8 +632,8 @@ for r=1:num_trials
     try wbhandle = waitbar(r/num_trials, wbhandle); catch, delete(wbhandle); error('MSE manually stopped by user.'); end
 end
 try delete(wbhandle); catch, error('Oops!');end
+
 % Calculate the mean squared error
-%
 num_trials = num_trials - nps; % Subtract failed iterations
 % Check how many nps were subptracted, i.e. failed runs of the MSE
 if num_trials <= 0
@@ -606,18 +648,14 @@ if ~REAL_DATA
 else
     rmse_ = sqrt(error_ ./ num_trials) ./ relativator(y); % Divided by the range of the data to calculate the relative rmse
 end
+
 %% Plot MSE and the PCRB vs Time
-%
-if PCRB
+if PCRB && MSE % Both
     figure('Name', 'NMM - EKF vs CRB')
     if ~REAL_DATA
         for i = 1:NAugmented
             subplot(2,4,i)
             semilogy(t,rmse_(i,:),'.-'); hold on;
-        %     semilogy(rmse(i,:),'x-');
-%             semilogy(rmse_(i,:),'.-');
-        %     semilogy(mse__(i,:),'.-');
-%             semilogy(pcrb(i,:),'.-');
             semilogy(t,pcrb_analytic(i,:),'.-');
             grid on;
             xlabel('Time (s)');
@@ -628,7 +666,6 @@ if PCRB
         for i = 1:NAugmented
             subplot(2,4,i);
             semilogy(pcrb_analytic(i,:),'.-'); hold on;
-%             semilogy(pcrb(i,:),'.-');
             grid on;
             xlabel('Time (s)');
             ylabel(['RMSE state ' num2str(i)]);
@@ -638,18 +675,38 @@ if PCRB
         
         figure
         semilogy(t,rmse_,'.-'); hold on;
-%         semilogy(rmse_,'.-');
         ylim([10^-6 10^6]);
         grid on;
     end
     % legend({'RMSE (EKF)', 'RMSE (Analytic - Euler)', 'RMSE (RK)', 'PCRB', 'PCRB Analytic'});
     legend({'RMSE', 'PCRB'});
+    
+% Only MSE    
+elseif MSE
+    figure(7)%, 'Name', 'Mean Square Error over time')
+    if ~REAL_DATA
+        for i = 1:NAugmented
+            subplot(2,4,i)
+            semilogy(t,rmse_(i,:),'.-');
+            grid on;
+            xlabel('Time (s)');
+            ylabel(['RMSE state ' num2str(i)]);
+        end
+    else
+%         semilogy(t,rmse_,'.-');
+%         plot(t,movmean(rmse_,[100 100]));
+        semilogy(t,movmean(rmse_,[100 100]));
+        hold on
+%         ylim([10^-6 10^6]);
+        grid on;
+    end
+    % legend({'RMSE (EKF)', 'RMSE (Analytic - Euler)', 'RMSE (RK)', 'PCRB', 'PCRB Analytic'});
+    legend({'RMSE'});
 end
 
 %% Plot average RMSE vs CRB 
 figure('Name', 'Mean Vm - EKF vs CRB')
 color = [0.1,0.6,0.7];
-%semilogy(rmse(i,:),'x-');
 hAx = plot(mean(rmse_,2),'o',...
     'MarkerSize',10,...
     'MarkerEdgeColor','k',...
@@ -709,7 +766,7 @@ if PCRB
     legend('PCRB', 'PCRB (Analytic)');
 end
 %%
-if PCRB
+if PCRB || MSE
     figure
 %     subplot(2,1,1)
     if ~REAL_DATA
@@ -717,9 +774,11 @@ if PCRB
     else
         semilogy(t,rmse_,'x-')
     end
-    hold on;
-    % semilogy(t,sum(mse__),'x-')
-    semilogy(t,sum(pcrb_analytic),'o-');
+    if PCRB
+        hold on;
+        % semilogy(t,sum(mse__),'x-')
+        semilogy(t,sum(pcrb_analytic),'o-');
+    end
     grid on;
     xlabel('Time (s)');
     ylabel('RMSE');
