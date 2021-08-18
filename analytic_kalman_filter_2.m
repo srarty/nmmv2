@@ -72,8 +72,7 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,nmm,H,Q,R,var
 
     x_hat(:,1) = x_hat_init;
     P_hat(:,:,1) = P_hat_init;
-    
-    
+        
     % Initialize K gain matrix
     K = ones(NStates, NSamples);
     
@@ -99,7 +98,9 @@ function [x_hat, P_hat, K, fe, fi] = analytic_kalman_filter_2(y,f_,nmm,H,Q,R,var
                     [x_hat(:,n+1), P_hat(:,:,n+1), K(:,n+1), fe(:,n+1), fi(:,n+1)] = akf_iterate(x_hat(:,n), P_hat(:,:,n), Q, R, y(n+1), H, ...
                         NStates, f_, scale_kf, scale_range, ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, integration_method, DO_FILTER);
             end
-                    
+%             if n == 1, warning('remove next line (debugging)'); end
+%             x_hat(6,n+1) =  x_hat(6,n); %20;%
+%             x_hat(7,n+1) =  x_hat(7,n); %10;%
         catch ME % Try catch around the whole for loop to make sure we close the progress bar in case there is an error during execution.
             if exist('wbhandle','var')
                 delete(wbhandle)

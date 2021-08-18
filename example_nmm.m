@@ -13,46 +13,49 @@ NInputs = 1; % Number of external inputs (u)
 NParams = 2; % Number of synaptic strength parameters (alpha_ie, alpha_ei, etc...)
 NAugmented = NStates + NInputs + NParams; % Total size of augmented state vector
 
-ESTIMATE        = true;         % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
+ESTIMATE        = false;         % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
 PCRB            = 0;            % Compute the PCRB (false = 0, or true > 0) The number here defines the iterations for CRB
 MSE             = 0;            % Compute the MSE (false = 0, or true > 0) The number here defines the iterations for MSE
-REAL_DATA       = true;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
-LFP_SIMULATION  = true;         % True if data is ground truth data from the Brunel model
-TRUNCATE        = -9800;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'
-SCALE_DATA      = 6/50;         % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
+REAL_DATA       = false;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
+LFP_SIMULATION  = true;         % True if data is ground truth data from the Brunel model (REAL_DATA must be 'true')
+LFP_TYPE        = 'voltage';    % Source of LFP, it can be 'current' (abstract sum of currents) or 'voltage' (linear combination of Vm_Py and Cortical Input)
+TRUNCATE        = -9700;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
+SCALE_DATA      = 1;%6/50;    % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
 INTERPOLATE     = 0;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
 
-REMOVE_DC       = false;        % Remove DC offset from simulated observed EEG
+REMOVE_DC       = true;        % Remove DC offset from simulated observed EEG
+SMOOTH          = 0;         % Moving average on EEG to filter fast changes (numeric, window size)
 ADD_NOISE       = true;         % Add noise to the forward model's states
 ADD_OBSERVATION_NOISE = true;	% Add noise to the forward model's states
 
 KF_TYPE         = 'unscented';  % String: 'unscented', 'extended' (default) or 'none'
 ANALYTIC_TYPE   = 'analytic';   % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
 
-ALPHA_KF_LBOUND  = false;       % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
+ALPHA_KF_LBOUND  = false;        % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
 ALPHA_KF_UBOUND  = 0;%1e3;      % Upper bound on alpha in the Kalman Filter (integer, if ~=0, the upper bound is ALPHA_KF_UBOUND)
 ALPHA_DECAY     = false;        % Exponential decay of alpha-params
-FIX_PARAMS      = false;         % Fix input and alpha parameters to initial conditions
-RANDOM_ALPHA    = true;         % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
+FIX_ALPHA       = true;         % On forward modelling, Fix input and alpha parameters to initial conditions
+FIX_U           = true;         % If 'true', fixes input, if 'false' it doesn't. Needs FIX_PARAMS = true
+RANDOM_ALPHA    = false;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
 MONTECARLO      = false;        % Calculatruee term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
 
-PLOT            = true;        % Ture to plot the result of the forward model and fitting.
+PLOT            = true;         % True to plot the result of the forward model and fitting.
 
 relativator = @(x)sqrt(mean(x.^2,2)); % @(x)(max(x')-min(x'))'; % If this is different to @(x)1, it calculates the relative RMSE dividing by whatever this value is.
 % ----------------------------------------------------------------------- %
 
 % Location of the data
 % data_file = './data/Seizure_1.mat';
-data_file = 'C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/lfp.mat';
+data_file = 'C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/lfp_last.mat';
 
 % Initialise random number generator for repeatability
 rng(0);
 
 %% Initialization
 % params = set_parameters('alpha', mu); % Set params.u from the input argument 'mu' of set_params
-params = set_parameters('alpha');       % Chose params.u from a constant value in set_params
+params = set_parameters('brunel');       % Chose params.u from a constant value in set_params
 
-N = 2000; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
+N = 10000;%9800; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
 if (TRUNCATE && REAL_DATA), N = TRUNCATE; end % If TRUNCATE ~=0, only take N = TRUNCATE samples of the recording or simulation
 dT = params.dt;         % sampling time step (global)
 dt = 1*dT;            	% integration time step
@@ -82,7 +85,7 @@ t = 0:dt:(N-1)*dt;
 %
 
 u = params.u;
-alpha = [params.alpha_ie; params.alpha_ei]; % Parameters in the augmented state vector. Synaptic strengths
+alpha = [402; 186.4];%[params.alpha_ie; params.alpha_ei]; % Parameters in the augmented state vector. Synaptic strengths
 
 % Initialise trajectory state
 x0 = zeros(NAugmented,1); % initial state
@@ -129,7 +132,7 @@ F_ = @(x,P)nmm_run(nmm, x, P,  'jacobian'); % F_ - transition matrix function (a
 % Euler integration
 for n=1:N-1
     x(:,n+1) = f(x(:,n)); % Zero covariance
-    if FIX_PARAMS, x(NStates+1:end,n+1) = x0(NStates+1:end); end % Fix the parameters (u and alpha)
+    if FIX_ALPHA, x(NStates+1:end,n+1) = x0(NStates+1:end); end % Fix the parameters (u and alpha)
 end
 
 % Calculate noise covariance based on trajectory variance over time??
@@ -141,7 +144,7 @@ end
 v = 10e-1.*mvnrnd(zeros(NAugmented,1),Q,N)';
 
 % Get alphas from estimation
-estimation = load('estimation_ukf'); % Load estimation results from real data (Seizure 1)
+estimation = load('gt');%load('estimation_ukf'); % Load estimation results from real data (Seizure 1)
 wbhandle = waitbar(0, 'Generating trajectory...'); % Loading bar
 % Generate trajectory again with added noise
 % Euler-Maruyama integration
@@ -149,8 +152,8 @@ for n=1:N-1
     try
         [x(:,n+1), ~, f_i(n+1), f_e(n+1)] = f(x(:,n)); % Propagate mean
 
-        %if (FIX_PARAMS), x(NStates+1:end,n+1) = x0(NStates+1:end); end % Fixing the parameters, alternative, try this: % 
-        if (FIX_PARAMS), x(NStates+1:end,n+1)= estimation.m(NStates+1:end, n+1); end % Fixing the parameters to the result of a previous recording.
+        % if (FIX_PARAMS), x(NStates+1:end,n+1) = x0(NStates+1:end); end % Fixing the parameters, alternative, try this (next line): 
+        if (FIX_ALPHA), x(NStates+1+~FIX_U:end,n+1)= estimation.x(NStates+1+~FIX_U:end, min(n+1,size(estimation.x, 2))); end % Fixing the parameters to the result of a previous recording.
         x(:,n+1) = x(:,n+1) + (ADD_NOISE * v(:,n)); % Add noise if the ADD_NOISE option is true.
     catch ME % Try catch around the whole for loop to make sure we close the progress bar in case there is an error during execution.
         if exist('wbhandle','var')
@@ -180,6 +183,10 @@ y = H*x + w;
 if REMOVE_DC
     % Remove DC offset from simulation (Observed EEG)
     y = y - mean(y(length(y)/2:end));
+end
+
+if SMOOTH
+    y = smooth(y,SMOOTH);
 end
 
 if ~ESTIMATE
@@ -241,19 +248,24 @@ if REAL_DATA
         y = Seizure(:,Ch)';
     else
         % Ground truth
+        if strcmp('current', LFP_TYPE), Seizure = LFP; else Seizure = LFP_V; end
         y = Seizure; % Load the data
         y = reshape(y,1,length(y));% Ensure it's horizontal
         x = zeros([size(x,1) size(Seizure,2)]); 
         x(1,:) = (V_py - v_rest) * 1e3; % Substract the resting membrane potential from the Brunel and scale to remove mV
-        x(2,:) = [0 diff(x(1,:))/lfp_dt];
+        x(2,:) = [0 diff(x(1,:))/(lfp_dt)];
         x(3,:) = (V_in - v_rest) * 1e3;
         x(4,:) = [0 diff(x(3,:))/lfp_dt];
         x(5,:) = u;
+        x(6,:) = alpha1;
+        x(7,:) = alpha2;
+        
+%         x0 = x(:,1);
     end
         
     if REMOVE_DC
         % Remove DC offset from real or ground truth data
-        y = y - mean(y(length(y)/2:end));
+        y = y - 20;%mean(y(length(y)/2:end));
     end
     
     % Check if the data contains a time stamp
@@ -364,7 +376,8 @@ if PLOT
         axs = nan(NStates,1); % Axes handles to link subplots x-axis
         for i = 1:NStates
             axs(i) = subplot(NStates, 1, i);
-            plot(t_(1:min(length(t_),size(x,2))),x(i,1:min(length(t_),size(x,2)))'); hold on;
+            %plot(t_(1:min(length(t_),size(x,2))),x(i,1:min(length(t_),size(x,2)))'); hold on;
+            plot(t,x(i,:)'); hold on;            
             plot(t,m(i,:)','--');
     %         plot(t,m_(i,:)','--');
         %     plot(t,m__(i,:)','--');
@@ -418,26 +431,26 @@ if PLOT
         for i = 1:NAugmented
             subplot(2,4,i)
             % Forward model
-            plt_(P(i,i,:),'-'); hold on;
+%             plt_(P(i,i,:),'-'); hold on;
             % Estimation
             plt(Phat(i,i,:),'--');hold on;
     %         plt(Phat_(i,i,:),'--');
         end
-        legend({'Simulation', 'Analytic KF'});
+        %legend({'Simulation', 'Analytic KF'});
         subplot(2,4,1);
         title('Covariance matrix (P) - Diagonal');
 
-        %% Covariance of alpha vectors
-        figure
-        for i = 1:NAugmented
-            for j = 1:NAugmented
-                subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
-                % Estimation
-                plt(Phat(j,i,:),''); hold on;
-                xlim([0.2 5]);
-    %             ylim([-100000 100000]);
-            end
-        end
+%         %% Covariance of alpha vectors
+%         figure
+%         for i = 1:NAugmented
+%             for j = 1:NAugmented
+%                 subplot(NAugmented,NAugmented,i + NAugmented*(j-1));
+%                 % Estimation
+%                 plt(Phat(j,i,:),''); hold on;
+%                 xlim([0.2 5]);
+%     %             ylim([-100000 100000]);
+%             end
+%         end
 
     else
         %%
@@ -528,8 +541,8 @@ if PLOT
     end
     % Nice placement of figures
     poss = [104, 562, 560, 420; 694, 563, 560, 420; 1288, 562, 560, 420; 107,  49, 560, 420; 693,  51, 560, 420; 1287,  50, 560, 420];
-    for i = 1:6, figs{i}=figure(i); end
-    for i = 1:6, figs{i}.Position = poss(i,:); end
+    for i = 1:5, figs{i}=figure(i); end
+    for i = 1:5, figs{i}.Position = poss(i,:); end
 end % If PLOT
 
 %% Compute the posterior Cramer-Rao bound (PCRB)
