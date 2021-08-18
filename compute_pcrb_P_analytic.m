@@ -58,7 +58,7 @@ for k=2:N
     nps = []; % Vector that tracks all the points where there was an error due to the nearest positive semidefinite matrix algorithm
     nps_flag = false; % True when there is an error due to nps
     tic
-    for i=1:M % parfor
+    parfor i=1:M % parfor
         try
             % Sample the next time point for the current trajectory realisation
 %             [xk(:,i), P(:,:,i)] = f(xk(:,i), P(:,:,i));
@@ -67,7 +67,7 @@ for k=2:N
             % Kalman filter
             if strcmp('unscented', KF_TYPE)
                 % ukf_iterate: unscented kalman filter
-                [xk(:,i), P(:,:,i)] = ukf_iterate(xk(:,i), P(:,:,i), Q, R, y(i), H, NStates, f, 1, [], ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, 'euler', true);
+                [xk(:,i), P(:,:,i)] = ukf_iterate(xk(:,i), P(:,:,i), Q, R, y(k), H, NStates, f, 1, [], ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, 'euler', true);
             else
                 if strcmp('extended', KF_TYPE)
                     DO_FILTER = true;
@@ -75,7 +75,7 @@ for k=2:N
                     DO_FILTER = false;
                 end
                 % akf_iterate: analytic (extended) kalman filter
-                [xk(:,i), P(:,:,i)] = akf_iterate(xk(:,i), P(:,:,i), Q, R, y(i), H, NStates, f, 1, [], ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, 'euler', DO_FILTER);
+                [xk(:,i), P(:,:,i)] = akf_iterate(xk(:,i), P(:,:,i), Q, R, y(k), H, NStates, f, 1, [], ALPHA_KF_LBOUND, ALPHA_KF_UBOUND, 'euler', DO_FILTER);
             end
             
             % Compute the PCRB terms for the current trajectory realisation
@@ -89,14 +89,14 @@ for k=2:N
                 % P matrix is not positive definite -> Remove iteration
                 nps = [nps k];
                 nps_flag = true;
-                break;
+%                 break;
             elseif strcmp('Couldn''t find the nearest SPD', E.message)
                 disp(['Couldn''t find the nearest SPD at time sample = ' num2str(k)]);
                 disp(['Error found while Running PCRB , iteration: ' num2str(i)]);
                 % P matrix is not positive definite -> Remove iteration
                 nps = [nps k];
                 nps_flag = true;
-                break;
+%                 break;
             else
                 % If some other error, propagate it
                 rethrow(E);
@@ -121,5 +121,8 @@ for k=2:N
     % Update progress bar
     try wbhandle = waitbar(k/N, wbhandle); catch, delete(wbhandle); error('Manually stopped'); end
 end
+
 % Delete progress bar's handle
 try delete(wbhandle); catch, error('Oops!');end
+
+

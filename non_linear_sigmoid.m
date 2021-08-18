@@ -16,12 +16,13 @@
 %
 % Note: Plot the non-linearity with the following code:
 %{
+        params = set_parameters('brunel');       % Chose params.u from a constant value in set_params
         nonlinearity = [];
         count = 0;
         x = -5:0.1:20;
         for i = x
             count = count +1;
-            nonlinearity(count) = non_linear_sigmoid(i, nmm.params.r, nmm.params.v0);
+            nonlinearity(count) = non_linear_sigmoid(i, params.r, params.v0);
         end
         figure
         plot(x,nonlinearity, 'LineWidth', 2);
@@ -31,7 +32,7 @@
         xlabel('Input');
         hold;
         plot([min(x) max(x)],[0.5 0.5],'--k');
-        plot([nmm.params.v0 nmm.params.v0], [0 1],'--k');
+        plot([params.v0 params.v0], [0 1],'--k');
 %}
 %
 % Artemio - 2021
