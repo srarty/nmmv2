@@ -6,36 +6,34 @@ close all
 clear
 
 %% Options -------------------------------------------------------------- %
-% TODO: compare y_prediction, y_real, etc, and figure out what to do with
-% that
 NStates = 4; % Number of states
 NInputs = 1; % Number of external inputs (u)
 NParams = 2; % Number of synaptic strength parameters (alpha_ie, alpha_ei, etc...)
 NAugmented = NStates + NInputs + NParams; % Total size of augmented state vector
 
-ESTIMATE        = false;         % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
+ESTIMATE        = true;        % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
 PCRB            = 0;            % Compute the PCRB (false = 0, or true > 0) The number here defines the iterations for CRB
 MSE             = 0;            % Compute the MSE (false = 0, or true > 0) The number here defines the iterations for MSE
-REAL_DATA       = false;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
+REAL_DATA       = true;        % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
 LFP_SIMULATION  = true;         % True if data is ground truth data from the Brunel model (REAL_DATA must be 'true')
 LFP_TYPE        = 'voltage';    % Source of LFP, it can be 'current' (abstract sum of currents) or 'voltage' (linear combination of Vm_Py and Cortical Input)
-TRUNCATE        = -9700;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
-SCALE_DATA      = 1;%6/50;    % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
-INTERPOLATE     = 0;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
+TRUNCATE        = 0;%-4800;%-1000;%-9700;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
+SCALE_DATA      = 1;%6/50;      % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
+INTERPOLATE     = 3;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
 
-REMOVE_DC       = true;        % Remove DC offset from simulated observed EEG
-SMOOTH          = 0;         % Moving average on EEG to filter fast changes (numeric, window size)
+REMOVE_DC       = false;        % Remove DC offset from simulated observed EEG
+SMOOTH          = 0;            % Moving average on EEG to filter fast changes (numeric, window size)
 ADD_NOISE       = true;         % Add noise to the forward model's states
 ADD_OBSERVATION_NOISE = true;	% Add noise to the forward model's states
 
-KF_TYPE         = 'unscented';  % String: 'unscented', 'extended' (default) or 'none'
+KF_TYPE         = 'extended';  % String: 'unscented', 'extended' (default) or 'none'
 ANALYTIC_TYPE   = 'analytic';   % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
 
-ALPHA_KF_LBOUND  = false;        % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
+ALPHA_KF_LBOUND  = false;       % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
 ALPHA_KF_UBOUND  = 0;%1e3;      % Upper bound on alpha in the Kalman Filter (integer, if ~=0, the upper bound is ALPHA_KF_UBOUND)
 ALPHA_DECAY     = false;        % Exponential decay of alpha-params
-FIX_ALPHA       = true;         % On forward modelling, Fix input and alpha parameters to initial conditions
-FIX_U           = true;         % If 'true', fixes input, if 'false' it doesn't. Needs FIX_PARAMS = true
+FIX_ALPHA       = false;         % On forward modelling, Fix input and alpha parameters to initial conditions
+FIX_U           = false;         % If 'true', fixes input, if 'false' it doesn't. Needs FIX_PARAMS = true
 RANDOM_ALPHA    = false;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
 MONTECARLO      = false;        % Calculatruee term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
 
@@ -45,8 +43,13 @@ relativator = @(x)sqrt(mean(x.^2,2)); % @(x)(max(x')-min(x'))'; % If this is dif
 % ----------------------------------------------------------------------- %
 
 % Location of the data
-% data_file = './data/Seizure_1.mat';
-data_file = 'C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/lfp_last.mat';
+if ~LFP_SIMULATION
+%     data_file = './data/Seizure_1.mat';
+%     data_file = 'C:\Users\artemios\Dropbox\University of Melbourne\Epilepsy\Adis_data.mat';
+    data_file = 'C:\Users\artemios\Dropbox\University of Melbourne\Epilepsy\Resources for meetings\adis data\Adi_data_2.mat';
+else
+    data_file = 'C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/lfp_last.mat';
+end
 
 % Initialise random number generator for repeatability
 rng(0);
@@ -55,7 +58,7 @@ rng(0);
 % params = set_parameters('alpha', mu); % Set params.u from the input argument 'mu' of set_params
 params = set_parameters('brunel');       % Chose params.u from a constant value in set_params
 
-N = 10000;%9800; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
+N = 1000;%9800; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
 if (TRUNCATE && REAL_DATA), N = TRUNCATE; end % If TRUNCATE ~=0, only take N = TRUNCATE samples of the recording or simulation
 dT = params.dt;         % sampling time step (global)
 dt = 1*dT;            	% integration time step
@@ -245,7 +248,9 @@ if REAL_DATA
     if ~LFP_SIMULATION
         % Real iEEG recordings (neurovista)
         Ch = 1; % Channel
-        y = Seizure(:,Ch)';
+%         y = Seizure(:,Ch)';
+%         y = norm_lfp; 
+        y = lfp;
     else
         % Ground truth
         if strcmp('current', LFP_TYPE), Seizure = LFP; else Seizure = LFP_V; end
@@ -257,7 +262,12 @@ if REAL_DATA
         x(3,:) = (V_in - v_rest) * 1e3;
         x(4,:) = [0 diff(x(3,:))/lfp_dt];
         x(5,:) = u;
-        x(6,:) = alpha1;
+        if numel(alpha1) == 1
+            % this parameter can be size 1 or longer, if it's a vector it means
+            x(6,:) = alpha1; 
+        else
+            x(6,:) = interp(alpha1,0.2/dt); % dt of the monkey's LFP is 0.02 s
+        end
         x(7,:) = alpha2;
         
 %         x0 = x(:,1);
@@ -265,19 +275,21 @@ if REAL_DATA
         
     if REMOVE_DC
         % Remove DC offset from real or ground truth data
-        y = y - 20;%mean(y(length(y)/2:end));
+        y = y - mean(y(length(y)/2:end));
     end
     
     % Check if the data contains a time stamp
     if ~exist('T', 'var')
         if ~LFP_SIMULATION
-            T = 4.0694e6; % Hardcoded data taken from Seizure_1.mat
+%             T = 4.0694e6; % Hardcoded data taken from Seizure_1.mat
+            T = length(y) / fs;
         else
             T = lfp_dt * length(y);
         end
     end
     % Define the time step
-    params.dt = 1e-3*T/length(y); % 1e-3 because we want miliseonds
+    params.dt = T/length(y); % 1e-3*T/length(y); % 1e-3 because we want miliseonds
+    nmm.params.dt = params.dt;
         
     if TRUNCATE > 0
         % Truncate from the beginning
@@ -359,7 +371,7 @@ if PLOT
     %     plot(t,m_(1,:)','--'); % Analytic, rung kuta
         % plot(t,m__([1],:)','--'); % Analytic euler
         legend({'Actual','Estimation'});
-        ylabel('State 1');
+        ylabel('V_{Py}');
         ax2=subplot(212);
         plot(t,y); hold on;
     %     plot(t,y_ekf, '--');
@@ -374,14 +386,16 @@ if PLOT
         %% Plot all 4 states
         figure
         axs = nan(NStates,1); % Axes handles to link subplots x-axis
+        labels_y = {'V_{Py}' 'z_{Py}' 'V_{I}' 'z_{I}' 'u' '\alpha{}_1' '\alpha{}_2'};
         for i = 1:NStates
             axs(i) = subplot(NStates, 1, i);
             %plot(t_(1:min(length(t_),size(x,2))),x(i,1:min(length(t_),size(x,2)))'); hold on;
             plot(t,x(i,:)'); hold on;            
             plot(t,m(i,:)','--');
-    %         plot(t,m_(i,:)','--');
-        %     plot(t,m__(i,:)','--');
-            ylabel(['State ' num2str(i)]);
+%             plot(t,m_(i,:)','--');
+%             plot(t,m__(i,:)','--');
+%             ylabel(['State ' num2str(i) '(' labels_y{i} ')']);
+            ylabel(labels_y{i});
         end
         linkaxes(axs, 'x');
         legend({'Simulation', 'Estimation'});
@@ -392,12 +406,14 @@ if PLOT
         axs = nan(NAugmented - NStates,1); % Axes handles to link subplots x-axis
         for i = 1:NAugmented - NStates
             axs(i) = subplot(NAugmented - NStates, 1, i);
-            plot(t_(1:min(length(t_),size(x,2))),x(NStates + i,1:min(length(t_),size(x,2)))'); hold on;
-            plot(t,m(NStates + i,:)','--');
+%             plot(t_(1:min(length(t_),size(x,2))),x(NStates + i,1:min(length(t_),size(x,2)))'); hold on;
+            plot(t, x(NStates + i,:)'); hold on;
+            plot(t, m(NStates + i,:)','--');
             % plot(t,m_(i,:)','--');
             % plot(t,m__(i,:)','--');
             plot(t, zeros(size(t)), '--', 'Color', [0.8 0.8 0.8]);
-            ylabel(['Parameter ' num2str(i)]);
+%             ylabel(['Parameter ' num2str(i)]);
+            ylabel(labels_y{i + NStates});
         end
         linkaxes(axs, 'x');
         xlabel('time');
