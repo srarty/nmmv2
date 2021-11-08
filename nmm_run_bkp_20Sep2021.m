@@ -86,7 +86,7 @@ f_i = non_linear_sigmoid(  v_e,   r, v0, sigma_sq_e); % 0.5*erf((v_e - v0) / (sq
 phi = [f_e; f_i]; % Only the important indexes. This phi should be equal to the 2nd and 4th entries of phi_c
 
 C_inhibit = C; % Auxiliary matrix C_inhibit, same as C but the inhibitory element is negative to include it in the nonlinearity as inhibition
-C_inhibit(2,3) = -C_inhibit(2,3);
+C_inhibit(2,3) = -1;
 phi_c = non_linear_sigmoid(C_inhibit*x,r,v0); % Complete phi from C
 switch mode
     case 'transition'                
@@ -110,25 +110,10 @@ switch mode
         %}
         
         % Nonlinear component of expectation
-        % E[g(x)] is E_gx, or E[phi(X)]
-        % E_gx = B*x .* phi_c; % non_linear_sigmoid(C*x,r,v0)        
-%         phi = B*x .* phi_c; % E_gx = phi_c; % non_linear_sigmoid(C*x,r,v0) % This is phi(Xi)
-        phi_b = B*x;        
-        E_gx = zeros(size(x));
-        E_gx(2) = E_phi(x(2), -x(3)+x(5), v0, P(3,3), P(2,3), r); % E_phi(phi_b(2),phi_c(2),v0,P(1,1), P(1,3),r);        
-        E_gx(4) = E_phi(x(4), x(1), v0, P(1,1), P(4,1), r);% E_phi(phi_b(4),phi_c(4),v0,P(3,3), P(3,1),r);        
-        
-%         E_gx = zeros(size(phi,1)); % Full matrix
-%         phi_ = phi(z_idx);
-%         E_gx_ = zeros(size(phi_,1)); % 2 x 2 matrix
-%         for i = 1:size(phi_,1)
-%             for j = 1:size(phi_,1)
-%                 E_gx_(i,j) = E_phi(phi_(i),phi_(j),v0,P(j,j), P(i,j),r);
-%             end
-%         end
-%         E_gx(z_idx,z_idx) = E_gx_; % This is E_gx = E[phi(Xi)]
-
-
+        % E[g(x)] is E_gx, or E[phi(E)]
+        % E_gx = B*x .* phi_c; % non_linear_sigmoid(C*x,r,v0)
+        E_gx = phi_c; % non_linear_sigmoid(C*x,r,v0)
+                
         CPC = C(z_idx,:)*P*C(z_idx,:)';
         dCPB = diag(C(z_idx,:)*P*B(z_idx,:)');
         Bxi = B(z_idx,alpha_idx)*x(alpha_idx);
@@ -144,41 +129,67 @@ switch mode
         analytic_mean = A*x;
         analytic_mean(2:2:2*NSynapses) = analytic_mean(2:2:2*NSynapses) + psi;
         
-        % analytic_mean = A*x + B*x.*phi; 
+        % analytic_mean = A*x + B*x.*phi; % Matrices B and C are implicit in E_gx
         
         %% Analytic covariance (Artemio)
         %% P1 = APA'
         P1 = A*P*A'; % P2 = Q; % Q is added in analytic_kalman_filter_2 after calling nmm function
         
         %% P3 = -E[phi(E)]E[phi(E)'], this is, E[E_phi(E)] = E_gx 
-        P3 = -(E_gx * E_gx');
+%         P3_ = -E_gx*E_gx';
+%         P3 = zeros(NStates);
+%         P3 = P3_.*B*x;
+        x_ = B*x;
+        P3 = zeros(size(x_,1)); % Full matrix
+        x_ = x_(z_idx);
+        P3_ = zeros(size(x_,1)); % 2 x 2 matrix
+        for i = 1:size(x_,1)
+            for j = 1:size(x_,1)
+                P3_(i,j) = E_xi_gxj(x_(i),x_(j),v0,P(j,j), P(i,j),r);
+            end
+        end
+        P3(z_idx, z_idx) = - (P3_ * P3_');
         
-        %% P4 = -A*Xi_hat*E[phi(Xi)'] 
-        P4 = -A*x * E_gx'; % -A*x*E_gx';
+        %% P4 = -A*E_hat*E[phi(E)'] 
+        P4_ = -x(z_idx) * E_gx(z_idx)'; % -A*x*E_gx';
+        P4 = zeros(NStates);
+        P4(z_idx,alpha_idx) = diag(diag(P4_));
         
         %% P5 = -E[phi(E)](A*E_hat)' 
-        P5 = -E_gx * (A*x)';% -E_gx*(A*x)';
+        P5_ = -E_gx(z_idx) * x(z_idx)';% -E_gx*(A*x)';
+        P5 = zeros(NStates);
+        P5(alpha_idx,z_idx) = diag(diag(P5_));
         
         %% P6 = E[phi(E)phi(E)'] 
         P6_ =  E_gx_gx(x, P, u, v0, r, MONTECARLO); % All the values of P (for all the states) % Do I need the dt? % This is E_gx_gx or E[g(x)g(x)] equation 25 to 30 SKF_Derivation_Prob
         P6 = zeros(NStates);
-        P6(z_idx,z_idx) = P6_;
+        P6(z_idx,z_idx) = P6_;% diag(diag(P6_));
+        % Now perform the Hadamard product with (Xi)(Xi') as in the
+        % derivation document.
+%         Bx = B*x;
+%         Bx = Bx * Bx';
+%         P6 = P6 .* Bx;
         
-        %% P7 and P8
-        %P7 = E_x_gx;% F*E_x_gx_1'; % This is E_x_gx = E[x_e *  g(x_i)] and E[x_i *  g(x_e)]? equation 22 SKF_Derivation_Prob
-        % E_xi_gxj(u1, u2, u3, v0, s12, s13, s23, s33, r)
-        P7 = zeros(NStates, NStates);
-%         P7(2,2) = E_xi_gxj(x(2), x(2), phi_c(2), v0, P(2,2), P(2,3), P(2,3), P(3,3), r);
-%         P7(2,4) = E_xi_gxj(x(2), x(4), phi_c(2), v0, P(2,4), P(2,3), P(4,3), P(3,3), r);
-%         P7(4,2) = E_xi_gxj(x(4), x(2), phi_c(2), v0, P(4,2), P(4,1), P(2,1), P(1,1), r);
-%         P7(4,4) = E_xi_gxj(x(4), x(4), phi_c(2), v0, P(4,4), P(4,1), P(4,1), P(1,1), r);
-        P7(2,2) = E_xi_gxj(x(2), x(2), -x(3)+x(5), v0, P(2,2), P(2,3), P(2,3), P(3,3), r);
-        P7(2,4) = E_xi_gxj(x(2), x(4), -x(3)+x(5), v0, P(2,4), P(2,3), P(4,3), P(3,3), r);
-        P7(4,2) = E_xi_gxj(x(4), x(2), x(1), v0, P(4,2), P(4,1), P(2,1), P(1,1), r);
-        P7(4,4) = E_xi_gxj(x(4), x(4), x(1), v0, P(4,4), P(4,1), P(4,1), P(1,1), r);
+        %% P7 and P8         
+%         E_x_gx = [0                     0                          0                           0                    0  0  0; ...
+%                   0                     0                          0                           0                    0  0  0; ...
+%                   0                     0                          0                           0                    0  0  0; ...
+%                   0                     0                          0                           0                    0  0  0; ...
+%                   0                     0                          0                           0                    0  0  0; ...
+%                   0    E_xi_gxj(x(1),x(3),v0,P(3,3), P(1,3),r)     0                           0                    0  0  0; ...
+%                   0                     0                          0        E_xi_gxj(x(3),x(1),v0,P(1,1), P(3,1),r) 0  0  0];
+%         
+        
+        E_x_gx = zeros(size(x,1));
+        for i = 1:size(x,1)
+            for j = 1:size(x,1)
+                E_x_gx(i,j) = E_xi_gxj(x(i),x(j),v0,P(j,j), P(i,j),r);
+            end
+        end
+                          
+        P7 = E_x_gx;% F*E_x_gx_1'; % This is E_x_gx = E[x_e *  g(x_i)] and E[x_i *  g(x_e)]? equation 22 SKF_Derivation_Prob
                 
-
-        P8 = P7';%E_x_gx';% E_gx_x;% E_x_gx_2*F'; % This is the transpose of P7
+        P8 = E_x_gx';% E_gx_x;% E_x_gx_2*F'; % This is the transpose of P7
                         
         % P4, P5, P7 and P8 are covered by the following lines
         % Missing covariance terms (updates alpha params):
@@ -188,7 +199,7 @@ switch mode
                 
         %% Output:
         % Uncomment next line for full polynomial as above.
-%         analytic_cov = P1 + P3 + P6 + P4 + P5 + P7 + P8; % Full polynomial
+        % analytic_cov = P1 + P3 + P6 + P4 + P5 + P7 + P8; % Full polynomial
         % Comment previous line and uncomment following three to calculate
         % P4, P5, P7 and P8 as Phi + Phi'
         analytic_cov = P1 + P3 + P6;% + P4 + P5 + P7 + P8;
@@ -302,7 +313,7 @@ varargout{4} = f_e;
 
 end % End function
 
-%% Function to calculate P6 (equation 14)
+%% Function to calculate P6
 function expectation = E_gx_gx(x, P, u, v0, r, montecarlo, varargin)
     % Computes the 6th term of the analytic covariance polynomial
     % Inputs:
@@ -375,20 +386,13 @@ function expectation = E_gx_gx(x, P, u, v0, r, montecarlo, varargin)
     end
 end
 
-%% Function to E[phi(Xi)] (equation 12)
-function expectation = E_phi(x_i,x_j, v0, s_jj, s_ij, r)
-% Computes Equation 29 from SKF_Derivation_Algebraic:
+%% Function to calculate P7 and P8
+function expectation = E_xi_gxj(x_i,x_j, v0, s_jj, s_ij, r)
+% Computes the 7th and 8th terms of the P polynomial (P7 and P8). Equation
+% 29 from SKF_Derivation_Algebraic:
 % E[f(x)] = (x_i/2)*erf((x_j-v0)/sqrt(2(s_jj + r^2))) + x_i/2 + s_ij/sqrt(2*pi*(s_jj + r^2))*exp(-(x_j-v0)^2/(2*(s_jj+r^2)))
 
 	expectation = (x_i/2)*erf((x_j-v0)/sqrt(2*(s_jj + r^2))) + x_i/2 +...
         (s_ij/sqrt(2*pi*(s_jj + r^2)))*exp(-(x_j-v0)^2/(2*(s_jj+r^2)));
 
-end
-
-%% Function to E[Xi*phi(Xi)] (equation 13)
-function expectation = E_xi_gxj(u1, u2, u3, v0, s12, s13, s23, s33, r)
-% Computes Equation 37 from SKF_Derivation_Algebraic:
-	expectation = ((u1*u2+s12)/2)*(1+erf((u3-v0)/sqrt(2*(r^2 + s33)))) -...
-        ((s13*s23*(u3-v0)/(sqrt(2*pi)*(r^2 + s33)^(3/2))) - ((s23*u1+s13*u2)/sqrt(2*pi*(r^2 + s33)))) *...
-        exp(-(u3-v0)^2 /(2*(r^2 + s33)));
 end

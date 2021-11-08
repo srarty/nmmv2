@@ -4,11 +4,14 @@
 %   x0 - initial states
 %   P0 - initial covariance matrix
 %   params - parameters defined by Jensen and Rit
+%   C_CONSTANT - (optional) Default is 135
 %
 % Outputs:
 %   nmm - (struct) the neural mass model
 %
-function nmm = nmm_define(x0,P0,params)
+function nmm = nmm_define(x0,P0,params, varargin)
+if nargin > 3, C_CONSTANT = varargin{1}; else, C_CONSTANT = 135; end
+
 % Indexes
 v_idx = [1 3];
 z_idx = [2 4];
@@ -27,11 +30,11 @@ alpha_ie    = params.alpha_ie; % (inhibitory)
 u           = params.u;	% mean input firing rate.
 scale       = params.scale; % Scale to fix mismatch in state amplitudes. Not to be confused with the scael in analytic_kalman_filter_2
 
-c_constant = 100;
-% c1 = 1*c_constant;	% number of synapses
-% c2 = 0.8*c_constant;
-c1 = 8*c_constant;	% number of synapses (matches brunel)
-c2 = 2*c_constant; % (matches brunel)
+c_constant = C_CONSTANT; %135;%675; % This should reflect Brunel's 'N' variable
+c1 = 0.25*c_constant;%1*c_constant;	% number of synapses
+c2 = 0.25*c_constant;%0.8*c_constant;
+% c1 = 4*c_constant;	% number of synapses (matches brunel?)
+% c2 = 1*c_constant; % (matches brunel?)
 
 % Number of augmented states
 xlen = length(x0);
@@ -58,6 +61,8 @@ A =     [1,                  dt*scale,      0,              0,          0,  0,  
 %
 B = zeros(xlen);
 B(z_idx, alpha_idx) = diag(ones(size(z_idx)));
+% B(4,7) = 1; % ?
+% B(2,6) = 1; % ?
 
 % C Matrix (Augmented)
 % C =     [0,	0,	0,	0,	0,	0,	0; ...
@@ -72,6 +77,7 @@ C = zeros(xlen);
 C(2,3) = 1; % inhibitory -> excitatory
 C(4,1) = 1; % excitatory -> inhibitory
 C(2,u_idx) = 1; % input -> excitatory
+% C(4,u_idx) = 1; % input -> inhibitory % Only uncomment this to test external excitatory inputs to the inhibitory population
 C = C./scale;
 
 alpha_i = alpha_ei * c1 * 2 * e_0 * dt * decay_e; % lumped constant (inhibitory, input to)
