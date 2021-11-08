@@ -2,6 +2,11 @@
 % Can be modified to more states by changing NStates. And the model
 % functions, e.g. model_NM = 4 states, model_NM_6thOrder = 6 states
 
+% TODO: Firing rates in the background activity should be set to, aroun 1
+% Hz? Check the actual value, but we know that the background activity is
+% some value. For exzample, when we are away from seizures, we can
+% cosntrain the firing rate to keep a value.
+
 close all
 clear
 
@@ -17,14 +22,15 @@ MSE             = 0;            % Compute the MSE (false = 0, or true > 0) The n
 REAL_DATA       = true;        % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
 LFP_SIMULATION  = true;         % True if data is ground truth data from the Brunel model (REAL_DATA must be 'true')
 LFP_TYPE        = 'voltage';    % Source of LFP, it can be 'current' (abstract sum of currents) or 'voltage' (linear combination of Vm_Py and Cortical Input)
-TRUNCATE        = 0;%-4800;%-1000;%-9700;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
-SCALE_DATA      = 1;%6/50;      % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
+TRUNCATE        = 0; %-50000; %10000;%-4900;%-1000;%-9700;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
+SCALE_DATA      = 1; %6/50;      % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
 INTERPOLATE     = 3;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
 
-REMOVE_DC       = false;        % Remove DC offset from simulated observed EEG
+REMOVE_DC       = 0;         % int{1,2} Remove DC offset from observed EEG (1) or observed and simulated (2).
 SMOOTH          = 0;            % Moving average on EEG to filter fast changes (numeric, window size)
 ADD_NOISE       = true;         % Add noise to the forward model's states
 ADD_OBSERVATION_NOISE = true;	% Add noise to the forward model's states
+C_CONSTANT      = 135;          % Connectivity constant in nmm_define. It is 'J' or Average number of synapses between populations. (Default = 135)
 
 KF_TYPE         = 'extended';  % String: 'unscented', 'extended' (default) or 'none'
 ANALYTIC_TYPE   = 'analytic';   % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
@@ -34,7 +40,7 @@ ALPHA_KF_UBOUND  = 0;%1e3;      % Upper bound on alpha in the Kalman Filter (int
 ALPHA_DECAY     = false;        % Exponential decay of alpha-params
 FIX_ALPHA       = false;         % On forward modelling, Fix input and alpha parameters to initial conditions
 FIX_U           = false;         % If 'true', fixes input, if 'false' it doesn't. Needs FIX_PARAMS = true
-RANDOM_ALPHA    = false;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
+RANDOM_ALPHA    = true;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
 MONTECARLO      = false;        % Calculatruee term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
 
 PLOT            = true;         % True to plot the result of the forward model and fitting.
@@ -44,11 +50,12 @@ relativator = @(x)sqrt(mean(x.^2,2)); % @(x)(max(x')-min(x'))'; % If this is dif
 
 % Location of the data
 if ~LFP_SIMULATION
-%     data_file = './data/Seizure_1.mat';
+    data_file = './data/Seizure_1.mat';
 %     data_file = 'C:\Users\artemios\Dropbox\University of Melbourne\Epilepsy\Adis_data.mat';
-    data_file = 'C:\Users\artemios\Dropbox\University of Melbourne\Epilepsy\Resources for meetings\adis data\Adi_data_2.mat';
+%     data_file = 'C:\Users\artemios\Dropbox\University of Melbourne\Epilepsy\Resources for meetings\adis data\Adi_data_2.mat';
 else
-    data_file = 'C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/lfp_last.mat';
+%     data_file = 'C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/lfp_last.mat';
+    data_file = 'C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/CUBN/lfp_last.mat';
 end
 
 % Initialise random number generator for repeatability
@@ -56,9 +63,10 @@ rng(0);
 
 %% Initialization
 % params = set_parameters('alpha', mu); % Set params.u from the input argument 'mu' of set_params
-params = set_parameters('brunel');       % Chose params.u from a constant value in set_params
+% params = set_parameters('alpha');       % Chose params.u from a constant value in set_params
+params = set_parameters('brunel', 40);       % Chose params.u from a constant value in set_params
 
-N = 1000;%9800; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
+N = 500;%9800; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
 if (TRUNCATE && REAL_DATA), N = TRUNCATE; end % If TRUNCATE ~=0, only take N = TRUNCATE samples of the recording or simulation
 dT = params.dt;         % sampling time step (global)
 dt = 1*dT;            	% integration time step
@@ -88,7 +96,7 @@ t = 0:dt:(N-1)*dt;
 %
 
 u = params.u;
-alpha = [402; 186.4];%[params.alpha_ie; params.alpha_ei]; % Parameters in the augmented state vector. Synaptic strengths
+alpha = [params.alpha_ie; params.alpha_ei]; % Parameters in the augmented state vector. Synaptic strengths[402; 186.4];%
 
 % Initialise trajectory state
 x0 = zeros(NAugmented,1); % initial state
@@ -99,7 +107,7 @@ x0(NStates+1:end) = [u; alpha];
 % Initialize covariance matrix
 P0 = 1e2*eye(NAugmented);
 % Make P0 different for z-values
-P0([2 4],[2 4]) = P0([2 4],[2 4]) * 50;
+% P0([2 4],[2 4]) = P0([2 4],[2 4]) * 50;
 P = zeros(NAugmented, NAugmented, N);
 P(:,:,1) = P0;
 
@@ -109,7 +117,7 @@ f_e = zeros(1,N); % Firing rate of the excitatory neurons
 
 
 % Define the model
-nmm = nmm_define(x0, P0, params);
+nmm = nmm_define(x0, P0, params, C_CONSTANT);
 % Pass options to model struct
 nmm.options.P6_montecarlo   = MONTECARLO;
 nmm.options.ALPHA_DECAY     = ALPHA_DECAY;
@@ -135,14 +143,14 @@ F_ = @(x,P)nmm_run(nmm, x, P,  'jacobian'); % F_ - transition matrix function (a
 % Euler integration
 for n=1:N-1
     x(:,n+1) = f(x(:,n)); % Zero covariance
-    if FIX_ALPHA, x(NStates+1:end,n+1) = x0(NStates+1:end); end % Fix the parameters (u and alpha)
+    if FIX_ALPHA, x(NStates+2:end,n+1) = x0(NStates+2:end); end % Fix the parameters (u and alpha)
 end
 
 % Calculate noise covariance based on trajectory variance over time??
 %   Why noise on all states?
 % Q = 1e-3*eye(NAugmented);
  Q = 10^-3.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
-% Q(NStates+1 : end, NStates+1 : end) =  10e-3*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
+% Q(NStates+1 : end, NStates+1 : end) =  10e-2*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
 
 v = 10e-1.*mvnrnd(zeros(NAugmented,1),Q,N)';
 
@@ -155,8 +163,8 @@ for n=1:N-1
     try
         [x(:,n+1), ~, f_i(n+1), f_e(n+1)] = f(x(:,n)); % Propagate mean
 
-        % if (FIX_PARAMS), x(NStates+1:end,n+1) = x0(NStates+1:end); end % Fixing the parameters, alternative, try this (next line): 
-        if (FIX_ALPHA), x(NStates+1+~FIX_U:end,n+1)= estimation.x(NStates+1+~FIX_U:end, min(n+1,size(estimation.x, 2))); end % Fixing the parameters to the result of a previous recording.
+        if (FIX_ALPHA), x(NStates+2:end,n+1) = x0(NStates+2:end); end % Fixing the parameters, alternative, try this (next line): 
+%         if (FIX_ALPHA), x(NStates+1+~FIX_U:end,n+1)= estimation.x(NStates+1+~FIX_U:end, min(n+1,size(estimation.x, 2))); end % Fixing the parameters to the result of a previous recording.
         x(:,n+1) = x(:,n+1) + (ADD_NOISE * v(:,n)); % Add noise if the ADD_NOISE option is true.
     catch ME % Try catch around the whole for loop to make sure we close the progress bar in case there is an error during execution.
         if exist('wbhandle','var')
@@ -183,7 +191,7 @@ R = 1e-1*eye(1);
 w = ADD_OBSERVATION_NOISE .* mvnrnd(zeros(size(H,1),1),R,abs(N))'; % Absolute value of N accounts for when TRUNCATE is negative (truncating the initial part of the recording)
 y = H*x + w;
 
-if REMOVE_DC
+if REMOVE_DC == 2
     % Remove DC offset from simulation (Observed EEG)
     y = y - mean(y(length(y)/2:end));
 end
@@ -230,15 +238,22 @@ if ~ESTIMATE
     % Firing rates (Output of the nonlinearity)
     figure
     ax1 = subplot(2,1,1);
+    yyaxis left
     plot(t, f_e);
     title('Sigmoid function output');
     ylabel('f_e');
+    yyaxis right
+    plot(t, f_e * params.e0);
+    
     ax2 = subplot(2,1,2);
+    yyaxis left
     plot(t, f_i);
     ylabel('f_i');
     linkaxes([ax1 ax2],'x');
     xlabel('Time (s)');
-   
+    yyaxis right
+    plot(t, f_i * params.e0);
+    
     return
 end
     
@@ -248,12 +263,12 @@ if REAL_DATA
     if ~LFP_SIMULATION
         % Real iEEG recordings (neurovista)
         Ch = 1; % Channel
-%         y = Seizure(:,Ch)';
+        y = Seizure(:,Ch)';
 %         y = norm_lfp; 
-        y = lfp;
+%         y = lfp;
     else
         % Ground truth
-        if strcmp('current', LFP_TYPE), Seizure = LFP; else Seizure = LFP_V; end
+        if strcmp('current', LFP_TYPE), Seizure = LFP; else, Seizure = LFP_V; end
         y = Seizure; % Load the data
         y = reshape(y,1,length(y));% Ensure it's horizontal
         x = zeros([size(x,1) size(Seizure,2)]); 
@@ -261,21 +276,27 @@ if REAL_DATA
         x(2,:) = [0 diff(x(1,:))/(lfp_dt)];
         x(3,:) = (V_in - v_rest) * 1e3;
         x(4,:) = [0 diff(x(3,:))/lfp_dt];
-        x(5,:) = u;
+        % u could be 1 sample longer than x:
+        try
+            x(5,:) = u;
+        catch E
+            x(5,:) = u(2:end);
+        end
         if numel(alpha1) == 1
             % this parameter can be size 1 or longer, if it's a vector it means
-            x(6,:) = alpha1; 
+            x(6,:) = alpha1 * (nmm.x0(6)/nmm.params.alpha_ie); % alpha1 is the parameter from Brunel. Divide by all other stuff to complete the lumped parameter as NMM
         else
             x(6,:) = interp(alpha1,0.2/dt); % dt of the monkey's LFP is 0.02 s
         end
-        x(7,:) = alpha2;
+        x(7,:) = abs(alpha2) * (nmm.x0(7)/nmm.params.alpha_ei);
         
 %         x0 = x(:,1);
     end
         
-    if REMOVE_DC
+    if REMOVE_DC ~= 0
         % Remove DC offset from real or ground truth data
         y = y - mean(y(length(y)/2:end));
+%         y = y - 150; %16.25;
     end
     
     % Check if the data contains a time stamp
