@@ -17,6 +17,7 @@ switch mode
         params.e0 = 70; % max firing rate
         params.r = 2.773; %8.08; %1.318; % dbl exp: 1.04; %12.5; % Sigmoid slope
         params.v0 = 23.35; %27.9; %21.36; % dbl exp: 49.66; %40; % Firing Threshold
+        
         % inverse time constants
         params.decay_e = 50; % 100;% (1/ tau_e)
         params.decay_i = 100; % 50; % (1/tau_i)

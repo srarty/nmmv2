@@ -22,25 +22,25 @@ MSE             = 0;            % Compute the MSE (false = 0, or true > 0) The n
 REAL_DATA       = false;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
 LFP_SIMULATION  = false;        % True if data is ground truth data from the Brunel model (REAL_DATA must be 'true')
 LFP_TYPE        = 'voltage';    % Source of LFP, it can be 'current' (abstract sum of currents) or 'voltage' (linear combination of Vm_Py and Cortical Input)
-TRUNCATE        = -50000;%-45000;%4500;%-25000; %-50000; %10000;%-4900;%-1000;%-9700;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
-SCALE_DATA      = 6/50;%30/2;%6/50;%9;%1;%6/50;      % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
+TRUNCATE        = -50000;       % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
+SCALE_DATA      = 6/50;         % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
 INTERPOLATE     = 0;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
 
 REMOVE_DC       = 0;            % int{1,2} Remove DC offset from observed EEG (1) or observed and simulated (2).
 SMOOTH          = 0;            % Moving average on EEG to filter fast changes (numeric, window size)
 ADD_NOISE       = true;         % Add noise to the forward model's states
-ADD_OBSERVATION_NOISE = false;	% Add noise to the forward model's states
-C_CONSTANT      = 135; %135;          % Connectivity constant in nmm_define. It is 'J' or Average number of synapses between populations. (Default = 135)
+ADD_OBSERVATION_NOISE = true;	% Add noise to the forward model's states
+C_CONSTANT      = 135;          % Connectivity constant in nmm_define. It is 'J' or Average number of synapses between populations. (Default = 135)
 
-KF_TYPE         = 'unscented';  % String: 'unscented', 'extended' (default)
-ANALYTIC_TYPE   = 'analytic';   % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
+KF_TYPE         = 'extended';   % String: 'unscented', 'extended' (default)
+ANALYTIC_TYPE   = 'pip';        % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
 
 ALPHA_KF_LBOUND  = false;       % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
 ALPHA_KF_UBOUND  = 0;%1e3;      % Upper bound on alpha in the Kalman Filter (integer, if ~=0, the upper bound is ALPHA_KF_UBOUND)
 ALPHA_DECAY     = false;        % Exponential decay of alpha-params
 FIX_ALPHA       = false;        % On forward modelling, Fix input and alpha parameters to initial conditions
 FIX_U           = false;        % If 'true', fixes input, if 'false' it doesn't. Needs FIX_PARAMS = true
-RANDOM_ALPHA    = false;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
+RANDOM_ALPHA    = true;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
 MONTECARLO      = false;        % Calculae true term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
 
 PLOT            = true;         % True to plot the result of the forward model and fitting.
@@ -159,7 +159,7 @@ if REAL_DATA
 else
     Q = 10^-1.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
 end
-%  Q(NStates+1 : end, NStates+1 : end) =  10e-3*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
+% Q(NStates+1 : end, NStates+1 : end) =  10e-4*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
 
 v = mvnrnd(zeros(NAugmented,1),Q,N)';% 10e-1.*mvnrnd(zeros(NAugmented,1),Q,N)';
 
@@ -195,7 +195,7 @@ H = H.*1; % Scale the observation matrix if needed
 % Scale
 H = H/nmm.params.scale;
 
-R = 1e-1*eye(1);
+R = 10e-1*eye(1);
 
 w = ADD_OBSERVATION_NOISE .* mvnrnd(zeros(size(H,1),1),R,abs(N))'; % Absolute value of N accounts for when TRUNCATE is negative (truncating the initial part of the recording)
 y = H*x + w;
@@ -387,8 +387,8 @@ nmm.x0 = m0; % Update initial value in nmm, i.e. nmm.x0
 % Calculate P0 from the forward simulation
 P0 = cov(x(:,ceil(size(x,2)/2):end)');
 P0(5,5) = 100;%100
-P0(6,6) = 10000;%1e6; 1000
-P0(7,7) = 10000;%1e3; 100
+P0(6,6) = 1e6;%1e6; 1000
+P0(7,7) = 1e3;%1e3; 100
 nmm.P0 = P0;
 
 % Apply KF filter chosen in options at the top
