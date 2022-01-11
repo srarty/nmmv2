@@ -35,6 +35,10 @@ c1 = 0.25*c_constant;%1*c_constant;	% number of synapses
 c2 = 0.25*c_constant;%0.8*c_constant;
 % c1 = 4*c_constant;	% number of synapses (matches brunel?)
 % c2 = 1*c_constant; % (matches brunel?)
+% c1 = 1*c_constant;
+% c2 = 0.8*c_constant;
+% c1 = 0.25 * c_constant;
+% c2 = 1 * c_constant;
 
 % Number of augmented states
 xlen = length(x0);

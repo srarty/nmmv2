@@ -16,32 +16,32 @@ NInputs = 1; % Number of external inputs (u)
 NParams = 2; % Number of synaptic strength parameters (alpha_ie, alpha_ei, etc...)
 NAugmented = NStates + NInputs + NParams; % Total size of augmented state vector
 
-ESTIMATE        = true;        % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
+ESTIMATE        = true;         % Run the forward model and estimate (ESTIMATE = true), or just forward (ESTIMATE = false)
 PCRB            = 0;            % Compute the PCRB (false = 0, or true > 0) The number here defines the iterations for CRB
 MSE             = 0;            % Compute the MSE (false = 0, or true > 0) The number here defines the iterations for MSE
-REAL_DATA       = true;        % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
-LFP_SIMULATION  = true;         % True if data is ground truth data from the Brunel model (REAL_DATA must be 'true')
+REAL_DATA       = false;         % True to load Seizure activity from neurovista recordings, false to generate data with the forward model
+LFP_SIMULATION  = false;        % True if data is ground truth data from the Brunel model (REAL_DATA must be 'true')
 LFP_TYPE        = 'voltage';    % Source of LFP, it can be 'current' (abstract sum of currents) or 'voltage' (linear combination of Vm_Py and Cortical Input)
-TRUNCATE        = 0; %-50000; %10000;%-4900;%-1000;%-9700;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
-SCALE_DATA      = 1; %6/50;      % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
-INTERPOLATE     = 3;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
+TRUNCATE        = -50000;%-45000;%4500;%-25000; %-50000; %10000;%-4900;%-1000;%-9700;        % If ~=0, the real data from recordings is truncated from sample 1 to 'TRUNCATE'. If negative, it keeps the last 'TRUNCATE' samples.
+SCALE_DATA      = 6/50;%30/2;%6/50;%9;%1;%6/50;      % Scale Raw data to match dynamic range of the membrane potentials in our model. Multiplies 'y' by the value of SCALE_DATA, try SCALE_DATA = 0.12
+INTERPOLATE     = 0;            % Upsample Raw data by interpolating <value> number of samples between each two samples. Doesn't interpolate if INTERPOLATE == {0,1}.
 
-REMOVE_DC       = 0;         % int{1,2} Remove DC offset from observed EEG (1) or observed and simulated (2).
+REMOVE_DC       = 0;            % int{1,2} Remove DC offset from observed EEG (1) or observed and simulated (2).
 SMOOTH          = 0;            % Moving average on EEG to filter fast changes (numeric, window size)
 ADD_NOISE       = true;         % Add noise to the forward model's states
-ADD_OBSERVATION_NOISE = true;	% Add noise to the forward model's states
-C_CONSTANT      = 135;          % Connectivity constant in nmm_define. It is 'J' or Average number of synapses between populations. (Default = 135)
+ADD_OBSERVATION_NOISE = false;	% Add noise to the forward model's states
+C_CONSTANT      = 135; %135;          % Connectivity constant in nmm_define. It is 'J' or Average number of synapses between populations. (Default = 135)
 
-KF_TYPE         = 'extended';  % String: 'unscented', 'extended' (default) or 'none'
+KF_TYPE         = 'unscented';  % String: 'unscented', 'extended' (default)
 ANALYTIC_TYPE   = 'analytic';   % Algorithm to run: 'pip' or 'analytic'. Only makes a difference if the filter (KF_TYPE) is 'extended' or 'none'
 
 ALPHA_KF_LBOUND  = false;       % Zero lower bound (threshold) on alpha in the Kalman Filter (boolean)
 ALPHA_KF_UBOUND  = 0;%1e3;      % Upper bound on alpha in the Kalman Filter (integer, if ~=0, the upper bound is ALPHA_KF_UBOUND)
 ALPHA_DECAY     = false;        % Exponential decay of alpha-params
-FIX_ALPHA       = false;         % On forward modelling, Fix input and alpha parameters to initial conditions
-FIX_U           = false;         % If 'true', fixes input, if 'false' it doesn't. Needs FIX_PARAMS = true
-RANDOM_ALPHA    = true;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
-MONTECARLO      = false;        % Calculatruee term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
+FIX_ALPHA       = false;        % On forward modelling, Fix input and alpha parameters to initial conditions
+FIX_U           = false;        % If 'true', fixes input, if 'false' it doesn't. Needs FIX_PARAMS = true
+RANDOM_ALPHA    = false;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
+MONTECARLO      = false;        % Calculae true term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
 
 PLOT            = true;         % True to plot the result of the forward model and fitting.
 
@@ -64,9 +64,9 @@ rng(0);
 %% Initialization
 % params = set_parameters('alpha', mu); % Set params.u from the input argument 'mu' of set_params
 % params = set_parameters('alpha');       % Chose params.u from a constant value in set_params
-params = set_parameters('brunel', 40);       % Chose params.u from a constant value in set_params
+params = set_parameters('brunel', 30);       % Chose params.u from a constant value in set_params
 
-N = 500;%9800; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
+N = 5000;%9800; % 148262; % LFP size: 10000 (can change) % Seizure 1 size: 148262; % number of samples
 if (TRUNCATE && REAL_DATA), N = TRUNCATE; end % If TRUNCATE ~=0, only take N = TRUNCATE samples of the recording or simulation
 dT = params.dt;         % sampling time step (global)
 dt = 1*dT;            	% integration time step
@@ -136,7 +136,12 @@ x(:,1) = x0;
 f = @(x)nmm_run(nmm, x, [], 'transition');
 F = @(x)nmm_run(nmm, x, [], 'jacobian');
 % Analytic
-f_ = @(x,P)nmm_run(nmm, x, P,  ANALYTIC_TYPE);
+if strcmp('unscented', KF_TYPE)
+    f_ = @(x,P)nmm_run(nmm, x, P,  'transition');
+else
+    f_ = @(x,P)nmm_run(nmm, x, P,  ANALYTIC_TYPE);
+end
+
 F_ = @(x,P)nmm_run(nmm, x, P,  'jacobian'); % F_ - transition matrix function (a function that takes the current state and returns the Jacobian).
 
 %% Generate trajectory
@@ -148,11 +153,15 @@ end
 
 % Calculate noise covariance based on trajectory variance over time??
 %   Why noise on all states?
-% Q = 1e-3*eye(NAugmented);
- Q = 10^-3.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
-% Q(NStates+1 : end, NStates+1 : end) =  10e-2*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
+warning('Initialization of Q differs for Real data vs Simulated data');
+if REAL_DATA
+    Q = 1e-2*eye(NAugmented);
+else
+    Q = 10^-1.*diag((0.4*std(x,[],2)*nmm.params.scale*sqrt(dt)).^2); % The alpha drift increases with a large covariance noise (Q)
+end
+%  Q(NStates+1 : end, NStates+1 : end) =  10e-3*eye(NAugmented - NStates); % 10e-1*ones(NAugmented - NStates);
 
-v = 10e-1.*mvnrnd(zeros(NAugmented,1),Q,N)';
+v = mvnrnd(zeros(NAugmented,1),Q,N)';% 10e-1.*mvnrnd(zeros(NAugmented,1),Q,N)';
 
 % Get alphas from estimation
 estimation = load('gt');%load('estimation_ukf'); % Load estimation results from real data (Seizure 1)
@@ -194,6 +203,7 @@ y = H*x + w;
 if REMOVE_DC == 2
     % Remove DC offset from simulation (Observed EEG)
     y = y - mean(y(length(y)/2:end));
+%     y = y - min(y(length(y)/2:end));
 end
 
 if SMOOTH
@@ -264,6 +274,7 @@ if REAL_DATA
         % Real iEEG recordings (neurovista)
         Ch = 1; % Channel
         y = Seizure(:,Ch)';
+%         y = Seizure(:,Ch)' + 50;
 %         y = norm_lfp; 
 %         y = lfp;
     else
@@ -292,11 +303,18 @@ if REAL_DATA
         
 %         x0 = x(:,1);
     end
+    
+%     
+%     if SCALE_DATA %#ok<BDLGI> % Removes the warning for SCALE_DATA being constant
+%         y = y * SCALE_DATA; %0.12;
+%     end   
         
     if REMOVE_DC ~= 0
         % Remove DC offset from real or ground truth data
         y = y - mean(y(length(y)/2:end));
-%         y = y - 150; %16.25;
+%         y = y + 30;
+%         y = y - min(y(length(y)/2:end)) + 10; % Adjusting to the range 40 - 100 from the forward NMM
+        y = y - 145; %16.25;
     end
     
     % Check if the data contains a time stamp
@@ -328,6 +346,8 @@ if REAL_DATA
     
     if SCALE_DATA %#ok<BDLGI> % Removes the warning for SCALE_DATA being constant
         y = y * SCALE_DATA; %0.12;
+        warning('Hardcoding DC offset');
+        y = y + 30;%- 150;%30;
     end    
 end
 
@@ -353,15 +373,23 @@ end
 
 %% Run KF for this model
 % Prior distribution (defined by m0 & P0)
-m0 = params.v0*ones(size(x0));% m0([2 4]) = 0; mean(x(:,ceil(size(x,2)/2):end),2); %
-m0(5) = 0;% mean(y(ceil(size(y,2)/2):end)); % x0(5);%32;%
-m0(6) = x0(6) + RANDOM_ALPHA * (x0(6)*(rand()-0.5));
-m0(7) = x0(7) + RANDOM_ALPHA * (x0(7)*(rand()-0.5));
+% m0 = params.v0*ones(size(x0));% m0([2 4]) = 0; 
+m0 = mean(x(:,ceil(size(x,2)/2):end),2); %
+m0(5) = x0(5) + RANDOM_ALPHA * (x0(5)*rand());%0;% mean(y(ceil(size(y,2)/2):end)); % x0(5);%32;%
+m0(6) = x0(6) + RANDOM_ALPHA * (x0(6)*(rand()-0.05));
+m0(7) = x0(7) + RANDOM_ALPHA * (x0(7)*(rand()-0.05));
 nmm.x0 = m0; % Update initial value in nmm, i.e. nmm.x0
 
 % P0 = 1e2*eye(NAugmented); % P0 will use the same initial value as the
 % forward model
 % P0(NAugmented - NParams + 1 : end, NAugmented - NParams + 1 : end) = 1e3*eye(NParams);
+
+% Calculate P0 from the forward simulation
+P0 = cov(x(:,ceil(size(x,2)/2):end)');
+P0(5,5) = 100;%100
+P0(6,6) = 10000;%1e6; 1000
+P0(7,7) = 10000;%1e3; 100
+nmm.P0 = P0;
 
 % Apply KF filter chosen in options at the top
 try
@@ -397,7 +425,7 @@ if PLOT
         plot(t,y); hold on;
     %     plot(t,y_ekf, '--');
         plot(t,y_analytic, '--');
-        legend({'Observed EEG', 'Estimated EEG (Analytic)'});
+        legend({'Observed EEG', 'Estimated EEG'});
         % plot(t,pcrb(1,:)')
         % legend({'CRLB'})
         ylabel('ECoG (mV)');
@@ -427,13 +455,9 @@ if PLOT
         axs = nan(NAugmented - NStates,1); % Axes handles to link subplots x-axis
         for i = 1:NAugmented - NStates
             axs(i) = subplot(NAugmented - NStates, 1, i);
-%             plot(t_(1:min(length(t_),size(x,2))),x(NStates + i,1:min(length(t_),size(x,2)))'); hold on;
             plot(t, x(NStates + i,:)'); hold on;
             plot(t, m(NStates + i,:)','--');
-            % plot(t,m_(i,:)','--');
-            % plot(t,m__(i,:)','--');
             plot(t, zeros(size(t)), '--', 'Color', [0.8 0.8 0.8]);
-%             ylabel(['Parameter ' num2str(i)]);
             ylabel(labels_y{i + NStates});
         end
         linkaxes(axs, 'x');

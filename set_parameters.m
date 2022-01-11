@@ -14,16 +14,16 @@ end
 
 switch mode
     case 'brunel'
-        params.e0 = 100;    % 2.5;      % max firing rate
-        params.r = 11.18; %47.36; %45.4;%3.02;%650; %225;     % 3.0285;   % erf sigmoid slope % params.r = 0.56;  % logistic sigmoid slope
-        params.v0 = 17.64; %364; %42.33;%22;%700; %275;    % 6;%22;%6; % Firing Threshold
+        params.e0 = 70; % max firing rate
+        params.r = 2.773; %8.08; %1.318; % dbl exp: 1.04; %12.5; % Sigmoid slope
+        params.v0 = 23.35; %27.9; %21.36; % dbl exp: 49.66; %40; % Firing Threshold
         % inverse time constants
         params.decay_e = 50; % 100;% (1/ tau_e)
         params.decay_i = 100; % 50; % (1/tau_i)
         
         params.u = mu;%11;%220;%15;%11;        % mean input mem potential
-        params.alpha_ei = 3.25; %1.005; %3.25;% 1.005; %7.46;     % Gains (a_ei = excitatory), lumped parameter will look like: % alpha_i = 162500
-        params.alpha_ie = 22;%6.25; %0.233; %6.25;% 0.233; %10.05;  % (a_ie = inhibitory), % alpha_e = 440000
+        params.alpha_ei = 3.25;% 1.005; %7.46;     % Gains (a_ei = excitatory), lumped parameter will look like: % alpha_i = 162500
+        params.alpha_ie = 6.25;% 0.233; %10.05;  % (a_ie = inhibitory), % alpha_e = 440000
 
         params.dt = 0.001;     % sampling time step         
         params.scale = 1; % Scale to fix mismatch in state amplitudes. Not to be confused with the scael in analytic_kalman_filter_2
