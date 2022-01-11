@@ -19,27 +19,28 @@
         params = set_parameters('brunel');       % Chose params.u from a constant value in set_params
         nonlinearity = [];
         count = 0;
-        x = -5:0.1:20;
+        x = -20:0.1:80;
         for i = x
             count = count +1;
             nonlinearity(count) = non_linear_sigmoid(i, params.r, params.v0);
         end
         figure
-        plot(x,nonlinearity, 'LineWidth', 2);
+        plot(x, params.e0*nonlinearity, 'LineWidth', 2);
         box off
         grid on
-        ylabel('Output');
-        xlabel('Input');
+        ylabel('Output firing rate');
+        xlabel('Input membrane potential');
         hold;
-        plot([min(x) max(x)],[0.5 0.5],'--k');
-        plot([params.v0 params.v0], [0 1],'--k');
+        plot([min(x) max(x)],[0.5 0.5]*params.e0,'--k');
+        plot([params.v0 params.v0], [0 1]*params.e0,'--k');
 %}
 %
 % Artemio - 2021
 function out = non_linear_sigmoid(x, r, v0, varargin)
+%% ERF:
     % Check for optional input argument 'sigma'. The default value is an
     % zeros array the same size as x.
-    if nargin <= 3
+    if ~(nargin > 3 && ~isempty(varargin{1})) % nargin <= 3
         input = (x - v0) / (sqrt(2) * r); % Sigma is zero
     else
         input = zeros(size(x));
@@ -48,5 +49,18 @@ function out = non_linear_sigmoid(x, r, v0, varargin)
             input(:,i) = (x(:,i) - v0) ./ (sqrt(2*(r^2 + sigma.^2)));
         end
     end
-    out = 0.5*erf(input) + 0.5;    
+    out = 0.5*erf(input) + 0.5;
+    
+% %% Double exponential sigmoid 2^-2^-x
+%     if (nargin > 3) && ~isempty(varargin{1})
+%         sigma = varargin{1}; % The optional input is the diagonal of the covariance matrix, i.e. variance vector
+%         if numel(sigma) > 1
+%             sigma = reshape(sigma, [size(x,1) 1]); % If sigma has more than 1 element, shape it the same as x
+%         end
+%         r_ = r + sigma;
+%     else
+%         r_ = r; 
+%     end
+%     out = 2.^-(r_.^-(x-v0)); 
+
 end

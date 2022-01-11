@@ -6,8 +6,8 @@
 %   Outputs:
 %       x - States vector at t + 1
 %       P - Covariance matrix at t + 1
-%       f_i - Output of nonlinearity (inhibitory)
 %       f_e - Output of nonlinearity (excitatory)
+%       f_i - Output of nonlinearity (inhibitory)
 %
 % The University of Melbourne | Artemio - March 2021
 %
@@ -61,12 +61,16 @@ a_ei    = x(6); % Synaptic strength (e to i)
 a_ie    = x(7); % Synaptic strength (i to e)
 
 % The state covariance
+sigma_vector = zeros(size(x));
 if ~isempty(P)
     sigma_sq_e = P(1,1);  % excitatory
     sigma_sq_i = P(3,3);  % inhib
     
     cov_e_i = P(1,3);
     cov_i_e = P(3,1);
+    
+    sigma_vector(2) = sigma_sq_i; 
+    sigma_vector(4) = sigma_sq_e;   
 else
     sigma_sq_e = 0;  % excitatory
     sigma_sq_i = 0;  % inhib
@@ -80,14 +84,14 @@ w_fast = [0.1713244923791705 0.3607615730481384  0.4679139345726904 0.1713244923
 y_fast = [0.033765242898424 0.169395306766868 0.380690406958402 0.966234757101576];% 0.830604693233132 0.619309593041599];
 
 % Sigmoid functions
-f_e = non_linear_sigmoid(u - v_i, r, v0, sigma_sq_i); % 0.5*erf((u - v_i - v0) / (sqrt(2 * (r^2 + sigma_sq_i)))) + 0.5;    % 0.5*erf((u - v_i - v0) / (sqrt(2) * r)) + 0.5;	   % excitatory population firing rate
-f_i = non_linear_sigmoid(  v_e,   r, v0, sigma_sq_e); % 0.5*erf((v_e - v0) / (sqrt(2 * (r^2 + sigma_sq_e)))) + 0.5;        % 0.5*erf((v_e - v0) / (sqrt(2) * r)) + 0.5;        % inhibitory population firing rate
-
-phi = [f_e; f_i]; % Only the important indexes. This phi should be equal to the 2nd and 4th entries of phi_c
+% f_e = non_linear_sigmoid(u - v_i, r, v0, sigma_sq_i); % 0.5*erf((u - v_i - v0) / (sqrt(2 * (r^2 + sigma_sq_i)))) + 0.5;    % 0.5*erf((u - v_i - v0) / (sqrt(2) * r)) + 0.5;	   % excitatory population firing rate
+% f_i = non_linear_sigmoid(  v_e,   r, v0, sigma_sq_e); % 0.5*erf((v_e - v0) / (sqrt(2 * (r^2 + sigma_sq_e)))) + 0.5;        % 0.5*erf((v_e - v0) / (sqrt(2) * r)) + 0.5;        % inhibitory population firing rate
+% 
+% phi = [f_e; f_i]; % Only the important indexes. This phi should be equal to the 2nd and 4th entries of phi_c
 
 C_inhibit = C; % Auxiliary matrix C_inhibit, same as C but the inhibitory element is negative to include it in the nonlinearity as inhibition
 C_inhibit(2,3) = -C_inhibit(2,3);
-phi_c = non_linear_sigmoid(C_inhibit*x,r,v0); % Complete phi from C
+phi_c = non_linear_sigmoid(C_inhibit*x,r,v0, sigma_vector); % Complete phi from C
 switch mode
     case 'transition'                
         % Nonlinear transition model
@@ -294,8 +298,8 @@ switch mode
 end % End switch
 
 % Optional outputs
-varargout{3} = f_i;
-varargout{4} = f_e;
+varargout{3} = phi_c(2);%f_e;
+varargout{4} = phi_c(4);%f_i;
 
 % Increase the counter of iterations if everything went well.
 % nmm.t = nmm.t + 1; 

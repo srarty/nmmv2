@@ -29,14 +29,14 @@ ylabel('Spike rate (normalized)');
 
 % input_rates = [1:4 5:5:300];
 % input_rates = [1:5 10:10:290];
-input_rates = [1:5 10:5:400];
+input_rates = [0:5:14 15:1:24 25:5:200 210:20:290 400 500];
 membrane_potentials = zeros(1,length(input_rates));
 pyramidal_rates = zeros(1,length(input_rates));
 for i_rates = 1:length(input_rates)
 %     data_file = ['C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/CUBN/lfp_inputRate_' num2str(input_rates(i_rates)) '.mat'];
 %     data_file = ['C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/CUBN/iterneurons_lfp_inputRate_' num2str(input_rates(i_rates)) '.mat'];
 %     data_file = ['C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/CUBN/inhibitory_input_lfp_inputRate_' num2str(input_rates(i_rates)) '.mat'];
-    data_file = ['C:/Users/artemios/Documents/GitHub2/mycroeeg/simulations/CUBN/searching for nonlinearity/lfp_refr_x5_inRate_' num2str(input_rates(i_rates)) '.mat'];
+    data_file = ['C:\Users\artemios\Documents\GitHub2\mycroeeg\simulations\CUBN\lfp_refr_x5_inputRate_' num2str(input_rates(i_rates)) '.mat'];
     
     load(data_file);
     
@@ -44,6 +44,11 @@ for i_rates = 1:length(input_rates)
     pyramidal_rates(i_rates) = mean(R_py(500:end))/params.e0;
 end
 
+% Append zeros in the beginning for a better fit
+input_rates = [-100:10:-10 input_rates];
+pyramidal_rates = [zeros(1,10) pyramidal_rates];
+
+%%
 fig = figure;
 yyaxis left
 scatter(input_rates, pyramidal_rates * params.e0,5,'filled');
@@ -51,17 +56,25 @@ xlabel('Input firing rate');
 ylabel('Pyramidal firing rate');
 
 %% Fit
-% ft = fittype( 'c/(1+exp(-a*(x+b)))+d', 'independent', 'x', 'dependent','y' ); % sigmoid
-ft = fittype( '0.5*erf((x - a) / (sqrt(2) * b)) + 0.5', 'independent', 'x', 'dependent', 'y' ); % Error function | a = v0 | b = r
+% ft = fittype( 'c/(1+exp(-a*(x-b)))+d', 'independent', 'x', 'dependent','y' );                     % sigmoid
+ft = fittype( '(0.5*erf((x - a) / (sqrt(2) * b)) + 0.5)', 'independent', 'x', 'dependent', 'y' ); % Error function | a = v0 | b = r
+% ft = fittype( '2.^-(a.^-(x-b))', 'independent', 'x', 'dependent', 'y' );                          % Double exponential sigmoid
+% ft = fittype( 'a*exp(-b*exp(-d*(x-c)))', 'independent', 'x', 'dependent', 'y' );                  % Gompertz sigmoid
+
 opts = fitoptions(ft);
-opts.StartPoint = [6 0]; %[0.5 -10 1 -0.005];
-fitresult_Py = fit(input_rates', pyramidal_rates', ft);%, opts);
+opts.StartPoint = [1 1];    % double: [2 44.13];    % gompertz: [1 1 40 0.01];      % erf: [1 40];      % sigmoid : [0 1 1 1];
+opts.Lower = [0 0];         % double: [1 -100];     % gompertz: [0 -100 -100 0];    % erf: [0 0];       % sigmoid : [0.12 35 1 0];
+opts.Upper = [30 5];        % double: [10 100];     % gompertz: [1 100 100 0.5];    % erf: [40 12.5];   % sigmoid : [0.12 40 1 1];
+fitresult_Py = fit(input_rates', pyramidal_rates', ft, opts) % With options
+% fitresult_Py = fit(input_rates', pyramidal_rates', ft) % No options
+
 
 figure(fig);
 yyaxis right
 plot(fitresult_Py);
 xlabel('Input firing rate');
 ylabel('Pyramidal firing rate');
+ylim([0 1]);
 yyaxis left
 return;
 

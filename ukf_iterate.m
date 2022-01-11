@@ -65,8 +65,8 @@ xsigma = chol(NStates*P)'; % Pxx = chol(Pxx)'*chol(Pxx) and sigmas  = sqrt(dx)sq
 Xa = x*ones(1,NSigma) + [xsigma, -xsigma];    % these are the sigma points!!
 
 Xa_ = zeros(size(Xa));
-P_ = zeros([size(P),size(Xa,2)]);
-P_(:,:,1) = P;
+% P_ = zeros([size(P),size(Xa,2)]);
+% P_(:,:,1) = P;
 
 % Propogate the sigma points through the system eqs
 if strcmpi('euler', i_method)
@@ -74,8 +74,9 @@ if strcmpi('euler', i_method)
     fe_vector = zeros(1,size(Xa,2));
     % Euler Integration
     for i = 1:size(Xa, 2) % Iterate through all sigma points % Using a parfor loop here takes 3.5 times longer :(
-        [Xa_(:,i), P_(:,:,i), fe_vector(i), fi_vector(i)] = f_(Xa(:,i), P_(:,:,i));
-        P_(:,:,i) = P_(:,:,i) + Q;
+%         [Xa_(:,i), P_(:,:,i), fe_vector(i), fi_vector(i)] = f_(Xa(:,i), P_(:,:,i));
+%         P_(:,:,i) = P_(:,:,i) + Q;
+        [Xa_(:,i), ~, fe_vector(i), fi_vector(i)] = f_(Xa(:,i), P); % We don't need P_ in the UKF, it's calculated below
     end
     fe = mean(fe_vector);
     fi = mean(fi_vector);
@@ -85,8 +86,9 @@ end
 
 xtilde = sum(Xa_,2)/NSigma;        % mean of the propogated sigma points
 X1 = Xa_ - xtilde*ones(1,size(Xa_,2)); % substract the mean from the columns of Xa_
-Sigma = ukf_getSigma(); % Generates a suitable Sigma (added covariance)
-Pxx = X1*X1' /NSigma + Sigma; % Pxx = X1*X1' /NSigma + Sigma; Why add Sigma?
+% Sigma = ukf_getSigma(); % Generates a suitable Sigma (added covariance)
+% Pxx = X1*X1' /NSigma + Sigma; % Pxx = X1*X1' /NSigma + Sigma; Why add Sigma?
+Pxx = X1*X1' /NSigma + Q; % Fixed by Yun. Q instead of Sigma
 Pxx = (Pxx + Pxx')/2; % make sure we have a symetric matrix again      
 
 %% Update step
@@ -100,7 +102,8 @@ Pxy = X1*Y1' /NSigma;
 % Calculate the Kalman gain and update
 K = Pxy/Pyy;
 x_hat = xtilde+K*(y-ytilde);
-Pxx = Pxx - K * Pxy';
+% Pxx = Pxx - K * Pxy'; % Error (?)
+Pxx = Pxx - K * Pyy * K';
 P_hat = (Pxx + Pxx')/2;
 
 %% Force alpha-parameters bounds above zero
