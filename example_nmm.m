@@ -40,7 +40,7 @@ ALPHA_KF_UBOUND  = 0;%1e3;      % Upper bound on alpha in the Kalman Filter (int
 ALPHA_DECAY     = false;        % Exponential decay of alpha-params
 FIX_ALPHA       = false;        % On forward modelling, Fix input and alpha parameters to initial conditions
 FIX_U           = false;        % If 'true', fixes input, if 'false' it doesn't. Needs FIX_PARAMS = true
-RANDOM_ALPHA    = true;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
+RANDOM_ALPHA    = false;        % Chose a random alpha initialization value (true), or the same initialization as the forward model (false)
 MONTECARLO      = false;        % Calculae true term P6 of the covariance matrix (P) by a montecarlo (true), or analytically (false)
 
 PLOT            = true;         % True to plot the result of the forward model and fitting.
@@ -274,9 +274,6 @@ if REAL_DATA
         % Real iEEG recordings (neurovista)
         Ch = 1; % Channel
         y = Seizure(:,Ch)';
-%         y = Seizure(:,Ch)' + 50;
-%         y = norm_lfp; 
-%         y = lfp;
     else
         % Ground truth
         if strcmp('current', LFP_TYPE), Seizure = LFP; else, Seizure = LFP_V; end
@@ -287,41 +284,29 @@ if REAL_DATA
         x(2,:) = [0 diff(x(1,:))/(lfp_dt)];
         x(3,:) = (V_in - v_rest) * 1e3;
         x(4,:) = [0 diff(x(3,:))/lfp_dt];
+        
         % u could be 1 sample longer than x:
-        try
-            x(5,:) = u;
-        catch E
-            x(5,:) = u(2:end);
-        end
+        try, x(5,:) = u; catch E, x(5,:) = u(2:end); end
+        
         if numel(alpha1) == 1
             % this parameter can be size 1 or longer, if it's a vector it means
             x(6,:) = alpha1 * (nmm.x0(6)/nmm.params.alpha_ie); % alpha1 is the parameter from Brunel. Divide by all other stuff to complete the lumped parameter as NMM
         else
             x(6,:) = interp(alpha1,0.2/dt); % dt of the monkey's LFP is 0.02 s
         end
-        x(7,:) = abs(alpha2) * (nmm.x0(7)/nmm.params.alpha_ei);
         
-%         x0 = x(:,1);
+        x(7,:) = abs(alpha2) * (nmm.x0(7)/nmm.params.alpha_ei);
     end
-    
-%     
-%     if SCALE_DATA %#ok<BDLGI> % Removes the warning for SCALE_DATA being constant
-%         y = y * SCALE_DATA; %0.12;
-%     end   
         
     if REMOVE_DC ~= 0
         % Remove DC offset from real or ground truth data
         y = y - mean(y(length(y)/2:end));
-%         y = y + 30;
-%         y = y - min(y(length(y)/2:end)) + 10; % Adjusting to the range 40 - 100 from the forward NMM
-        y = y - 145; %16.25;
     end
     
     % Check if the data contains a time stamp
     if ~exist('T', 'var')
         if ~LFP_SIMULATION
-%             T = 4.0694e6; % Hardcoded data taken from Seizure_1.mat
-            T = length(y) / fs;
+            T = length(y) / fs; % T = 4.0694e6; % Hardcoded data taken from Seizure_1.mat
         else
             T = lfp_dt * length(y);
         end
@@ -336,6 +321,7 @@ if REAL_DATA
         if LFP_SIMULATION
             x = x(:,1:N);
         end
+        
     elseif TRUNCATE < 0
         % Truncate from end
         y = y(end+N+1 : end);
@@ -380,15 +366,14 @@ m0(6) = x0(6) + RANDOM_ALPHA * (x0(6)*(rand()-0.05));
 m0(7) = x0(7) + RANDOM_ALPHA * (x0(7)*(rand()-0.05));
 nmm.x0 = m0; % Update initial value in nmm, i.e. nmm.x0
 
-% P0 = 1e2*eye(NAugmented); % P0 will use the same initial value as the
-% forward model
+% P0 = 1e2*eye(NAugmented); % P0 will use the same initial value as the forward model
 % P0(NAugmented - NParams + 1 : end, NAugmented - NParams + 1 : end) = 1e3*eye(NParams);
 
 % Calculate P0 from the forward simulation
 P0 = cov(x(:,ceil(size(x,2)/2):end)');
 P0(5,5) = 100;%100
-P0(6,6) = 1e6;%1e6; 1000
-P0(7,7) = 1e3;%1e3; 100
+P0(6,6) = 1e3; % 1000
+P0(7,7) = 1e3; % 100
 nmm.P0 = P0;
 
 % Apply KF filter chosen in options at the top
